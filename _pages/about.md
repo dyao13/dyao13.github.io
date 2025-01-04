@@ -7,6 +7,8 @@ redirect_from:
   - /about.html
 ---
 
+I study Computer Science and Applied Mathematics at Johns Hopkins Univeristy.
+
 Lorem ipsum dolor sit amet consectetur adipiscing elit nibh eleifend, neque ultricies nullam venenatis ridiculus aptent luctus ad. Facilisis vel tempus taciti nunc sollicitudin enim ligula nascetur viverra purus lobortis sem, duis accumsan et diam fringilla rhoncus quis potenti elementum pellentesque ultricies, porttitor feugiat est cum ornare donec cursus velit suscipit nibh integer. Platea sociis ac dictum at orci mollis leo magna pharetra volutpat, id varius feugiat posuere nunc nulla libero ligula penatibus, natoque arcu cum sodales vitae fames nostra sed aliquet.
 
 Fermentum dapibus quis taciti blandit primis tempus sed pharetra ut iaculis, habitant lectus ridiculus leo vel ligula torquent natoque montes felis conubia, curabitur vehicula ultricies est volutpat per a hac mattis. Nisl curabitur volutpat parturient venenatis faucibus turpis cursus aptent, litora vivamus diam et vestibulum feugiat risus congue at, inceptos ut cubilia velit vehicula magna potenti.

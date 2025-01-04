@@ -22,9 +22,12 @@ main:
 
   - title: "Coursework"
     url: /coursework/
+
+  - title: "Transcript"
+    url: https://github.com/dyao13/CV/blob/main/transcript/yao_transcript.pdf
     
   - title: "CV"
-    url: https://github.com/dyao13/CV
+    url: https://github.com/dyao13/CV/blob/main/yao_cv/yao_cv.pdf
     
-  - title: "Guide"
-    url: /markdown/
+  # - title: "Guide"
+  #   url: /markdown/

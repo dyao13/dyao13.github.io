@@ -24,10 +24,11 @@ main:
     url: /coursework/
 
   - title: "Transcript"
-    url: https://github.com/dyao13/CV/blob/main/transcript/yao_transcript.pdf
+    url: https://github.com/dyao13/CV/blob/main/yao_transcript.pdf
+    target: _blank
     
   - title: "CV"
-    url: https://github.com/dyao13/CV/blob/main/yao_cv/yao_cv.pdf
+    url: https://github.com/dyao13/CV/blob/main/yao_cv/yao_transcript.pdf
     
   # - title: "Guide"
   #   url: /markdown/

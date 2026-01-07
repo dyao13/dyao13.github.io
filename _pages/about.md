@@ -9,7 +9,7 @@ redirect_from:
 
 I study Biomedical Engineering and Applied Mathematics at Johns Hopkins University, where I investigate active sampling estimators under Dr. Michael Oberst.
 
-Abstracts
+**Abstracts**
 
 Hoffmann, J., Raghavan, S., Day, M., **Yao, D.**, et al. (2026). Continuous physiological monitoring reveals poor PRN sedation efficacy in pediatric critical care. Critical Care Congress. [Submitted.]
 

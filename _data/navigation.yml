@@ -14,14 +14,14 @@ main:
   # - title: "Teaching"
   #   url: /teaching/    
     
-  - title: "Portfolio"
-    url: /portfolio/
+  # - title: "Portfolio"
+  #   url: /portfolio/
         
   # - title: "Blog Posts"
   #   url: /year-archive/
 
-  - title: "Coursework"
-    url: /coursework/
+  # - title: "Coursework"
+  #   url: /coursework/
 
   - title: "Transcript"
     url: https://github.com/dyao13/CV/blob/main/yao_cv/yao_transcript.pdf

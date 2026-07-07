@@ -5,7 +5,9 @@
 -- frontend (assets/js/movies-app.js) calls.
 -- ===========================================================================
 
-create extension if not exists pgcrypto;
+create schema if not exists extensions;
+create extension if not exists pgcrypto with schema extensions;
+set search_path = public, extensions;
 
 -- ---------------------------------------------------------------------------
 -- Tables
@@ -633,7 +635,7 @@ $$;
 -- Any invited member can generate an invite code for a friend.
 create or replace function public.create_invite_code()
 returns text
-language plpgsql security definer set search_path = public
+language plpgsql security definer set search_path = public, extensions
 as $$
 declare
   v_uid uuid := auth.uid();

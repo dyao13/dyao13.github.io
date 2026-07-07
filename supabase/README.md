@@ -146,7 +146,7 @@ the SQL editor. It backfills all existing data as `movie`.
 ## Migrations, in order
 
 If you set up the database from an older `schema.sql`, run any migration
-files you have not yet applied, in numeric order (002 → 006). A fresh
+files you have not yet applied, in numeric order (002 → 007). A fresh
 `schema.sql` install needs none of them except the personal `update`
 statement at the end of migration 005.
 

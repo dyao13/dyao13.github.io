@@ -437,7 +437,7 @@ async function renderDashboard() {
     ${toolbarHtml()}
 
     <div class="movies-section">
-      <h2>My ranked movies</h2>
+      <h2>My movies</h2>
       <div class="bucket-tabs" role="tablist">
         ${["all", ...BUCKETS].map((tab) => `
           <button type="button" role="tab" data-tab="${tab}" aria-selected="${state.dashboardTab === tab}">

@@ -1,8 +1,8 @@
 {% include base_path %}
 <link rel="stylesheet" href="{{ base_path }}/assets/css/movies-app.css">
 
-<div id="movies-app" class="movies-app">
-  <noscript>This movie ranking app requires JavaScript.</noscript>
+<div id="movies-app" class="movies-app" data-media-type="{{ include.media_type | default: 'movie' }}">
+  <noscript>This ranking app requires JavaScript.</noscript>
   <div class="notice">Loading&hellip;</div>
 </div>
 

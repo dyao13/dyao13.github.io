@@ -89,3 +89,27 @@ export function insertAt(list, index, item) {
   copy.splice(index, 0, item);
   return copy;
 }
+
+/*
+ * Display numbering is unified across the three colors: green movies come
+ * first, then yellow, then red. Given all of a user's ratings, returns the
+ * amount to add to a rating's within-bucket rank_position to get its
+ * zero-indexed overall position.
+ */
+export function bucketOffsets(ratings) {
+  const counts = { green: 0, yellow: 0, red: 0 };
+  for (const r of ratings) {
+    if (counts[r.bucket] === undefined) throw new Error(`Unknown bucket: ${r.bucket}`);
+    counts[r.bucket] += 1;
+  }
+  return {
+    green: 0,
+    yellow: counts.green,
+    red: counts.green + counts.yellow,
+  };
+}
+
+/* 1-indexed overall rank of a rating, for display. */
+export function overallRank(rating, offsets) {
+  return rating.rank_position + offsets[rating.bucket] + 1;
+}

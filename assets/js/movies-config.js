@@ -24,3 +24,27 @@ export const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiO
  */
 
 export const TMDB_API_KEY = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIzYWUwNGY1MzM0MDk1ZTU3Mjc1Y2MxOTYwNjQzYTk5YSIsIm5iZiI6MTc4MzQ1NzM0My43NCwic3ViIjoiNmE0ZDY2M2Y2OTg0ZjljNDFlYjE2YWMxIiwic2NvcGVzIjpbImFwaV9yZWFkIl0sInZlcnNpb24iOjF9.2iqs9KryAdiLXg_PJfUVvO3QSHCHxuPdhuY98za-lgU";
+
+/*
+ * Optional: OMDb (omdbapi.com) API key for external ratings.
+ *
+ * Shows the IMDb rating and the Rotten Tomatoes critics score in movie
+ * search results and on movie detail pages. Get a free key (1,000
+ * requests/day) at https://www.omdbapi.com/apikey.aspx — the key arrives
+ * by email and must be activated via the link in that email.
+ *
+ * Leave it as "" to skip external ratings.
+ */
+
+export const OMDB_API_KEY = "83471f14";
+
+/*
+ * Optional: username whose rankings are shown publicly.
+ *
+ * Logged-out visitors to /movies/ see this account's ranked lists
+ * (read-only) instead of just a login screen. Requires that account to be
+ * marked public in the database — see supabase/migration-005-public-profile.sql.
+ * Set to "" to require login for everything.
+ */
+
+export const PUBLIC_PROFILE_USERNAME = "dandanfroghamster";

@@ -17,6 +17,7 @@ create table public.profiles (
   display_name text not null,
   avatar_url text,
   is_private boolean default false,
+  is_public boolean not null default false,
   created_at timestamptz default now()
 );
 
@@ -39,9 +40,15 @@ create table public.friendships (
   check (requester_id <> addressee_id)
 );
 
+-- Catalog of rankable items. Despite the historical name, this table holds
+-- movies, books, and TV shows, distinguished by media_type. The `director`
+-- column doubles as author (books) / creator (TV).
 create table public.movies (
   id uuid primary key default gen_random_uuid(),
-  tmdb_id integer unique,
+  media_type text not null default 'movie' check (media_type in ('movie', 'book', 'tv')),
+  tmdb_id integer,
+  imdb_id text,
+  openlibrary_id text,
   title text not null,
   release_year integer,
   poster_url text,
@@ -49,16 +56,25 @@ create table public.movies (
   created_at timestamptz default now()
 );
 
+-- TMDB movie ids and TV ids are separate numbering spaces, so dedup is
+-- scoped per medium.
+create unique index movies_media_tmdb_key
+  on public.movies (media_type, tmdb_id) where tmdb_id is not null;
+
+create unique index movies_media_openlibrary_key
+  on public.movies (media_type, openlibrary_id) where openlibrary_id is not null;
+
 create table public.ratings (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   movie_id uuid not null references public.movies(id) on delete cascade,
+  media_type text not null check (media_type in ('movie', 'book', 'tv')),
   bucket text not null check (bucket in ('green', 'yellow', 'red')),
   rank_position integer not null,
   score numeric(3,1) not null,
   updated_at timestamptz default now(),
   unique (user_id, movie_id),
-  unique (user_id, bucket, rank_position) deferrable initially deferred
+  unique (user_id, media_type, bucket, rank_position) deferrable initially deferred
 );
 
 create table public.watch_events (
@@ -309,8 +325,10 @@ select
   we.watched_on,
   we.context,
   we.created_at,
-  case when we.user_id = auth.uid() then we.notes else null end as notes
+  case when we.user_id = auth.uid() then we.notes else null end as notes,
+  m.media_type
 from public.watch_events we
+join public.movies m on m.id = we.movie_id
 where we.user_id = auth.uid() or public.is_friends_with(we.user_id);
 
 revoke all on public.watch_events_feed from anon, public;
@@ -337,6 +355,37 @@ where public.has_profile()
 
 revoke all on public.movie_ratings_visible from anon, public;
 grant select on public.movie_ratings_visible to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Public rankings view.
+-- Read-only, available WITHOUT login, and only for profiles explicitly
+-- marked is_public = true (e.g. the site owner's own list, shown to
+-- logged-out visitors of /movies/). Everything else stays login-only.
+-- ---------------------------------------------------------------------------
+
+create or replace view public.public_rankings as
+select
+  p.username,
+  p.display_name,
+  r.movie_id,
+  r.bucket,
+  r.rank_position,
+  r.score,
+  m.title,
+  m.release_year,
+  m.poster_url,
+  m.director,
+  m.media_type
+from public.ratings r
+join public.profiles p on p.id = r.user_id
+join public.movies m on m.id = r.movie_id
+where p.is_public;
+
+revoke all on public.public_rankings from public;
+grant select on public.public_rankings to anon, authenticated;
+
+-- To publish a user's rankings to logged-out visitors:
+--   update profiles set is_public = true where username = 'your-username';
 
 -- ---------------------------------------------------------------------------
 -- Scoring + ranking functions
@@ -373,9 +422,9 @@ end;
 $$;
 
 -- Re-assign rank_position 0..n-1 (preserving current order) and recompute
--- scores for one user's bucket. Runs with invoker rights, so RLS still
--- guarantees users can only touch their own rows.
-create or replace function public.renormalize_bucket(p_user uuid, p_bucket text)
+-- scores for one user's bucket within one medium. Runs with invoker rights,
+-- so RLS still guarantees users can only touch their own rows.
+create or replace function public.renormalize_bucket(p_user uuid, p_media_type text, p_bucket text)
 returns void
 language plpgsql
 as $$
@@ -384,7 +433,7 @@ declare
 begin
   select count(*) into v_total
   from ratings
-  where user_id = p_user and bucket = p_bucket;
+  where user_id = p_user and media_type = p_media_type and bucket = p_bucket;
 
   update ratings r
   set rank_position = sub.new_pos,
@@ -393,7 +442,7 @@ begin
   from (
     select id, (row_number() over (order by rank_position))::integer - 1 as new_pos
     from ratings
-    where user_id = p_user and bucket = p_bucket
+    where user_id = p_user and media_type = p_media_type and bucket = p_bucket
   ) sub
   where r.id = sub.id;
 end;
@@ -414,6 +463,7 @@ language plpgsql
 as $$
 declare
   v_uid uuid := auth.uid();
+  v_media_type text;
   v_old_bucket text;
   v_total integer := coalesce(array_length(p_ordered_movie_ids, 1), 0);
   i integer;
@@ -431,33 +481,40 @@ begin
   end if;
 
   if not (p_movie_id = any (p_ordered_movie_ids)) then
-    raise exception 'Movie is not in the ordered list';
+    raise exception 'Item is not in the ordered list';
   end if;
 
   if (select count(distinct m) from unnest(p_ordered_movie_ids) m) <> v_total then
     raise exception 'Ordered list contains duplicates';
   end if;
 
-  if (select count(*) from movies where id = any (p_ordered_movie_ids)) <> v_total then
-    raise exception 'Ordered list contains an unknown movie';
+  select media_type into v_media_type from movies where id = p_movie_id;
+  if v_media_type is null then
+    raise exception 'Unknown item';
   end if;
 
-  -- The list must contain every movie currently rated in this bucket...
+  -- Every id must be a real catalog item of the same medium.
+  if (select count(*) from movies where id = any (p_ordered_movie_ids) and media_type = v_media_type) <> v_total then
+    raise exception 'Ordered list mixes media types or contains an unknown item';
+  end if;
+
+  -- The list must contain every item currently rated in this bucket...
   if exists (
     select 1 from ratings r
-    where r.user_id = v_uid and r.bucket = p_bucket
+    where r.user_id = v_uid and r.media_type = v_media_type and r.bucket = p_bucket
       and not (r.movie_id = any (p_ordered_movie_ids))
   ) then
     raise exception 'Ranking is out of date; please reload and try again';
   end if;
 
-  -- ...and nothing else besides the movie being placed.
+  -- ...and nothing else besides the item being placed.
   if exists (
     select 1 from unnest(p_ordered_movie_ids) m
     where m <> p_movie_id
       and not exists (
         select 1 from ratings r
-        where r.user_id = v_uid and r.bucket = p_bucket and r.movie_id = m
+        where r.user_id = v_uid and r.media_type = v_media_type
+          and r.bucket = p_bucket and r.movie_id = m
       )
   ) then
     raise exception 'Ranking is out of date; please reload and try again';
@@ -468,10 +525,11 @@ begin
   where user_id = v_uid and movie_id = p_movie_id;
 
   for i in 1..v_total loop
-    insert into ratings (user_id, movie_id, bucket, rank_position, score, updated_at)
+    insert into ratings (user_id, movie_id, media_type, bucket, rank_position, score, updated_at)
     values (
       v_uid,
       p_ordered_movie_ids[i],
+      v_media_type,
       p_bucket,
       i - 1,
       public.score_for_position(i - 1, v_total, p_bucket),
@@ -485,7 +543,7 @@ begin
   end loop;
 
   if v_old_bucket is not null and v_old_bucket <> p_bucket then
-    perform public.renormalize_bucket(v_uid, v_old_bucket);
+    perform public.renormalize_bucket(v_uid, v_media_type, v_old_bucket);
   end if;
 end;
 $$;
@@ -498,6 +556,7 @@ as $$
 declare
   v_uid uuid := auth.uid();
   v_bucket text;
+  v_media_type text;
 begin
   if v_uid is null then
     raise exception 'Not authenticated';
@@ -505,10 +564,10 @@ begin
 
   delete from ratings
   where user_id = v_uid and movie_id = p_movie_id
-  returning bucket into v_bucket;
+  returning bucket, media_type into v_bucket, v_media_type;
 
   if v_bucket is not null then
-    perform public.renormalize_bucket(v_uid, v_bucket);
+    perform public.renormalize_bucket(v_uid, v_media_type, v_bucket);
   end if;
 end;
 $$;
@@ -602,7 +661,7 @@ grant execute on function public.has_profile() to authenticated;
 grant execute on function public.is_friends_with(uuid) to authenticated;
 grant execute on function public.can_view_watch_event(uuid) to authenticated;
 grant execute on function public.score_for_position(integer, integer, text) to authenticated;
-grant execute on function public.renormalize_bucket(uuid, text) to authenticated;
+grant execute on function public.renormalize_bucket(uuid, text, text) to authenticated;
 grant execute on function public.rank_movie(uuid, text, uuid[]) to authenticated;
 grant execute on function public.remove_rating(uuid) to authenticated;
 grant execute on function public.claim_invite_and_create_profile(text, text, text) to authenticated;

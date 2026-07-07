@@ -15,7 +15,7 @@
  */
 
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
-import { SUPABASE_URL, SUPABASE_ANON_KEY, TMDB_API_KEY } from "./movies-config.js";
+import { SUPABASE_URL, SUPABASE_ANON_KEY, TMDB_API_KEY, OMDB_API_KEY, PUBLIC_PROFILE_USERNAME } from "./movies-config.js";
 import {
   BUCKETS,
   bucketLabel,
@@ -25,14 +25,63 @@ import {
   nextComparisonIndex,
   applyComparison,
   insertAt,
+  bucketOffsets,
+  overallRank,
 } from "./movies-ranking.js";
 
 const root = document.getElementById("movies-app");
+
+/*
+ * The same app powers /movies/, /books/, and /shows/. Each Jekyll page sets
+ * data-media-type on the mount div; everything below adapts to it. Each
+ * medium has fully independent green/yellow/red lists per user.
+ */
+const MEDIA_TYPES = {
+  movie: {
+    key: "movie",
+    noun: "movie",
+    plural: "movies",
+    credit: "Directed by",
+    verb: "watch",
+    verbPast: "watched",
+    yearLabel: "Release year (optional)",
+    searchPlaceholder: "e.g. Parasite",
+    searchAttribution: `Search data from <a href="https://www.themoviedb.org" target="_blank" rel="noopener">TMDB</a>.`,
+    omdbType: "movie",
+  },
+  book: {
+    key: "book",
+    noun: "book",
+    plural: "books",
+    credit: "By",
+    verb: "read",
+    verbPast: "read",
+    yearLabel: "First published (optional)",
+    searchPlaceholder: "e.g. East of Eden",
+    searchAttribution: `Search data from <a href="https://openlibrary.org" target="_blank" rel="noopener">Open Library</a>.`,
+    omdbType: null, // no IMDb/RT ratings for books
+  },
+  tv: {
+    key: "tv",
+    noun: "show",
+    plural: "shows",
+    credit: "Created by",
+    verb: "watch",
+    verbPast: "watched",
+    yearLabel: "First aired (optional)",
+    searchPlaceholder: "e.g. Severance",
+    searchAttribution: `Search data from <a href="https://www.themoviedb.org" target="_blank" rel="noopener">TMDB</a>.`,
+    omdbType: "series",
+  },
+};
+
+const MEDIA = MEDIA_TYPES[root?.dataset.mediaType] ?? MEDIA_TYPES.movie;
 
 const state = {
   session: null,
   profile: null,
   authMode: "login", // "login" | "signup"
+  showAuth: false, // logged out: false = public rankings, true = login form
   dashboardTab: "all",
   dashboardData: null,
   addFlow: null,
@@ -56,6 +105,10 @@ function esc(value) {
 
 function uid() {
   return state.session?.user?.id ?? null;
+}
+
+function cap(s) {
+  return s ? s[0].toUpperCase() + s.slice(1) : s;
 }
 
 function fmtDate(dateStr) {
@@ -98,6 +151,10 @@ function scorePill(score, bucket) {
   return `<span class="score-pill score-pill--${esc(bucket)}">${esc(formatScore(score))}</span>`;
 }
 
+function rankPill(rank, bucket) {
+  return `<span class="score-pill score-pill--${esc(bucket)}">#${esc(rank)}</span>`;
+}
+
 function movieLabel(movie) {
   const year = movie.release_year ? ` (${movie.release_year})` : "";
   return `${movie.title}${year}`;
@@ -137,13 +194,125 @@ async function tmdbSearchMovies(query) {
   }));
 }
 
-async function tmdbFetchDirector(tmdbId) {
+async function tmdbFetchDetails(tmdbId) {
   try {
-    const data = await tmdbFetch(`/movie/${tmdbId}/credits`);
-    return (data.crew ?? []).find((c) => c.job === "Director")?.name ?? null;
+    const data = await tmdbFetch(`/movie/${tmdbId}`, { append_to_response: "credits" });
+    return {
+      director: (data.credits?.crew ?? []).find((c) => c.job === "Director")?.name ?? null,
+      imdb_id: data.imdb_id ?? null,
+    };
   } catch {
-    return null; // director is nice-to-have; never block the flow on it
+    return { director: null, imdb_id: null }; // nice-to-have; never block the flow
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Per-medium search: TMDB for movies and TV, Open Library for books   */
+/* ------------------------------------------------------------------ */
+
+function searchConfigured() {
+  return MEDIA.key === "book" ? true : tmdbConfigured(); // Open Library needs no key
+}
+
+async function searchMedia(query) {
+  if (MEDIA.key === "book") {
+    const url = new URL("https://openlibrary.org/search.json");
+    url.searchParams.set("q", query);
+    url.searchParams.set("limit", "8");
+    url.searchParams.set("fields", "key,title,first_publish_year,cover_i,author_name");
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Book search failed (Open Library ${res.status})`);
+    const data = await res.json();
+    return (data.docs ?? []).map((d) => ({
+      openlibrary_id: d.key,
+      title: d.title,
+      release_year: d.first_publish_year ?? null,
+      poster_url: d.cover_i ? `https://covers.openlibrary.org/b/id/${d.cover_i}-M.jpg` : null,
+      director: d.author_name?.[0] ?? null,
+    }));
+  }
+
+  if (MEDIA.key === "tv") {
+    const data = await tmdbFetch("/search/tv", { query, include_adult: "false" });
+    return (data.results ?? []).slice(0, 8).map((r) => ({
+      tmdb_id: r.id,
+      title: r.name,
+      release_year: r.first_air_date ? Number(r.first_air_date.slice(0, 4)) : null,
+      poster_url: r.poster_path ? `https://image.tmdb.org/t/p/w185${r.poster_path}` : null,
+    }));
+  }
+
+  return tmdbSearchMovies(query);
+}
+
+/* Extra metadata fetched when a search result is selected. */
+async function fetchMediaDetails(item) {
+  if (MEDIA.key === "book") return {}; // search results already carry the author
+  if (MEDIA.key === "tv") {
+    try {
+      const data = await tmdbFetch(`/tv/${item.tmdb_id}`, { append_to_response: "external_ids" });
+      return {
+        director: data.created_by?.[0]?.name ?? null,
+        imdb_id: data.external_ids?.imdb_id ?? null,
+      };
+    } catch {
+      return {};
+    }
+  }
+  return tmdbFetchDetails(item.tmdb_id);
+}
+
+/* ------------------------------------------------------------------ */
+/* OMDb external ratings (optional — needs OMDB_API_KEY in config)     */
+/* Provides the IMDb rating and the Rotten Tomatoes critics score.     */
+/* ------------------------------------------------------------------ */
+
+function omdbConfigured() {
+  return typeof OMDB_API_KEY === "string" && OMDB_API_KEY.trim().length > 0 && !!MEDIA.omdbType;
+}
+
+const omdbCache = new Map();
+
+async function fetchExternalRatings({ imdb_id, title, release_year }) {
+  if (!omdbConfigured()) return null;
+
+  const cacheKey = imdb_id || `${title}|${release_year ?? ""}`;
+  if (omdbCache.has(cacheKey)) return omdbCache.get(cacheKey);
+
+  let result = null;
+  try {
+    const url = new URL("https://www.omdbapi.com/");
+    url.searchParams.set("apikey", OMDB_API_KEY.trim());
+    if (imdb_id) {
+      url.searchParams.set("i", imdb_id);
+    } else {
+      url.searchParams.set("t", title);
+      url.searchParams.set("type", MEDIA.omdbType);
+      if (release_year) url.searchParams.set("y", String(release_year));
+    }
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.Response !== "False") {
+        const imdb = data.imdbRating && data.imdbRating !== "N/A" ? data.imdbRating : null;
+        const rt = (data.Ratings ?? []).find((r) => r.Source === "Rotten Tomatoes")?.Value ?? null;
+        if (imdb || rt) result = { imdb, rt };
+      }
+    }
+  } catch {
+    // External ratings are decoration; never surface an error for them.
+  }
+
+  omdbCache.set(cacheKey, result);
+  return result;
+}
+
+function extRatingsText(ratings) {
+  if (!ratings) return "";
+  const parts = [];
+  if (ratings.imdb) parts.push(`IMDb ${ratings.imdb}/10`);
+  if (ratings.rt) parts.push(`Rotten Tomatoes ${ratings.rt}`);
+  return parts.join(" · ");
 }
 
 /* ------------------------------------------------------------------ */
@@ -169,9 +338,17 @@ function go(hash) {
   }
 }
 
+function publicProfileConfigured() {
+  return typeof PUBLIC_PROFILE_USERNAME === "string" && PUBLIC_PROFILE_USERNAME.trim().length > 0;
+}
+
 async function render() {
   if (!state.session) {
-    renderAuth();
+    if (publicProfileConfigured() && !state.showAuth) {
+      renderPublicDashboard();
+    } else {
+      renderAuth();
+    }
     return;
   }
 
@@ -195,13 +372,82 @@ async function render() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Public (logged-out) rankings                                        */
+/* ------------------------------------------------------------------ */
+
+async function renderPublicDashboard() {
+  loadingView();
+
+  const { data, error } = await sb.from("public_rankings")
+    .select("*")
+    .eq("username", PUBLIC_PROFILE_USERNAME.trim())
+    .eq("media_type", MEDIA.key)
+    .order("rank_position");
+
+  const showLoginButton = `
+    <div class="movies-toolbar">
+      <button type="button" class="btn" id="show-login">Log in / Sign up</button>
+    </div>
+  `;
+
+  if (error || !data || data.length === 0) {
+    setView(`
+      ${showLoginButton}
+      <p>A ranking app for friends.</p>
+      <div class="notice">
+        ${error
+          ? "Public rankings are not available. (Has migration 005 been run in Supabase?)"
+          : "No public rankings to show yet."}
+      </div>
+    `);
+    bindShowLogin();
+    return;
+  }
+
+  const displayName = data[0].display_name;
+  const offsets = bucketOffsets(data);
+
+  setView(`
+    ${showLoginButton}
+    <h2>${esc(displayName)}'s ${esc(MEDIA.plural)}</h2>
+    ${BUCKETS.map((b) => {
+      const list = data.filter((r) => r.bucket === b).sort((x, y) => x.rank_position - y.rank_position);
+      return `
+        <div class="movies-section">
+          <h3>${bucketBadge(b)} ${esc(bucketLabel(b))}</h3>
+          ${list.length === 0 ? `<div class="notice">Nothing here yet.</div>` : list.map((r) => `
+            <div class="movie-row movie-row--${esc(r.bucket)}">
+              <span class="movie-row__rank">${overallRank(r, offsets)}.</span>
+              ${scorePill(r.score, r.bucket)}
+              <div class="movie-row__body">
+                <span class="movie-row__title">${esc(r.title)}</span>
+                ${r.release_year ? `<span class="movie-row__year">(${esc(r.release_year)})</span>` : ""}
+              </div>
+            </div>
+          `).join("")}
+        </div>
+      `;
+    }).join("")}
+    <p class="movies-muted">A private ${esc(MEDIA.noun)} ranking app for friends &mdash; log in to rank your own.</p>
+  `);
+  bindShowLogin();
+}
+
+function bindShowLogin() {
+  root.querySelector("#show-login")?.addEventListener("click", () => {
+    state.showAuth = true;
+    renderAuth();
+  });
+}
+
+/* ------------------------------------------------------------------ */
 /* Auth + profile setup                                                */
 /* ------------------------------------------------------------------ */
 
 function renderAuth() {
   const isSignup = state.authMode === "signup";
   setView(`
-    <p><strong>MovieRank</strong> &mdash; a private movie ranking app for friends.</p>
+    <p>A ranking app for friends.</p>
     <div class="movies-form">
       <form id="auth-form">
         <label for="auth-email">Email</label>
@@ -214,6 +460,7 @@ function renderAuth() {
           <button type="button" class="btn btn--inverse" id="auth-toggle">
             ${isSignup ? "I already have an account" : "Create an account"}
           </button>
+          ${publicProfileConfigured() ? `<button type="button" class="btn btn--inverse" id="auth-back">Back to rankings</button>` : ""}
         </div>
       </form>
       ${isSignup ? `<p class="movies-muted">You will need an invite code from an existing member to finish setting up your account.</p>` : ""}
@@ -223,6 +470,11 @@ function renderAuth() {
   root.querySelector("#auth-toggle").addEventListener("click", () => {
     state.authMode = isSignup ? "login" : "signup";
     renderAuth();
+  });
+
+  root.querySelector("#auth-back")?.addEventListener("click", () => {
+    state.showAuth = false;
+    render();
   });
 
   root.querySelector("#auth-form").addEventListener("submit", async (e) => {
@@ -306,8 +558,8 @@ function renderProfileSetup() {
 function toolbarHtml() {
   return `
     <div class="movies-toolbar">
-      <a class="btn" href="#/add">+ Add movie</a>
-      <a class="btn btn--inverse" href="#/">My movies</a>
+      <a class="btn" href="#/add">+ Add ${esc(MEDIA.noun)}</a>
+      <a class="btn btn--inverse" href="#/">My ${esc(MEDIA.plural)}</a>
       <a class="btn btn--inverse" href="#/friends">Friends</a>
       <button class="btn btn--inverse" id="logout-btn" type="button">Log out</button>
       <span class="movies-muted">Signed in as ${esc(state.profile.display_name)} (@${esc(state.profile.username)})</span>
@@ -328,15 +580,18 @@ async function loadDashboardData() {
     sb.from("ratings")
       .select("movie_id, bucket, rank_position, score, movies(id, title, release_year)")
       .eq("user_id", uid())
+      .eq("media_type", MEDIA.key)
       .order("rank_position"),
     sb.from("watch_events")
-      .select("id, movie_id, watched_on, created_at, movies(title, release_year), watch_event_participants(profiles(username, display_name))")
+      .select("id, movie_id, watched_on, created_at, movies!inner(title, release_year, media_type), watch_event_participants(profiles(username, display_name))")
       .eq("user_id", uid())
+      .eq("movies.media_type", MEDIA.key)
       .order("watched_on", { ascending: false, nullsFirst: false })
       .limit(200),
     sb.from("watch_events_feed")
       .select("id, movie_id, user_id, watched_on, created_at")
       .neq("user_id", uid())
+      .eq("media_type", MEDIA.key)
       .order("created_at", { ascending: false })
       .limit(20),
   ]);
@@ -378,16 +633,16 @@ function watchInfoByMovie(watches) {
   return info;
 }
 
-function rankedRowHtml(rating, watchInfo) {
+function rankedRowHtml(rating, watchInfo, offsets) {
   const movie = rating.movies;
   const info = watchInfo.get(rating.movie_id);
   const metaParts = [rating.bucket[0].toUpperCase() + rating.bucket.slice(1)];
-  if (info?.lastWatched) metaParts.push(`Watched ${fmtDate(info.lastWatched)}`);
+  if (info?.lastWatched) metaParts.push(`${cap(MEDIA.verbPast)} ${fmtDate(info.lastWatched)}`);
   if (info && info.withNames.size > 0) metaParts.push(`With ${[...info.withNames].join(", ")}`);
 
   return `
     <div class="movie-row movie-row--${esc(rating.bucket)}">
-      <span class="movie-row__rank">${rating.rank_position + 1}.</span>
+      <span class="movie-row__rank">${overallRank(rating, offsets)}.</span>
       ${scorePill(rating.score, rating.bucket)}
       <div class="movie-row__body">
         <a class="movie-row__title" href="#/movie/${esc(rating.movie_id)}">${esc(movie?.title ?? "Unknown")}</a>
@@ -398,26 +653,27 @@ function rankedRowHtml(rating, watchInfo) {
   `;
 }
 
-function bucketListHtml(ratings, bucket, watchInfo) {
+function bucketListHtml(ratings, bucket, watchInfo, offsets) {
   const list = ratings.filter((r) => r.bucket === bucket).sort((a, b) => a.rank_position - b.rank_position);
   if (list.length === 0) {
-    return `<div class="notice">No ${esc(bucket)} movies yet.</div>`;
+    return `<div class="notice">No ${esc(bucket)} ${esc(MEDIA.plural)} yet.</div>`;
   }
-  return list.map((r) => rankedRowHtml(r, watchInfo)).join("");
+  return list.map((r) => rankedRowHtml(r, watchInfo, offsets)).join("");
 }
 
 function dashboardListHtml(data) {
   const watchInfo = watchInfoByMovie(data.watches);
+  const offsets = bucketOffsets(data.ratings);
   if (data.ratings.length === 0 && state.dashboardTab === "all") {
-    return `<div class="notice">You have not ranked any movies yet. Use "Add movie" to get started.</div>`;
+    return `<div class="notice">You have not ranked any ${esc(MEDIA.plural)} yet. Use "Add ${esc(MEDIA.noun)}" to get started.</div>`;
   }
   if (state.dashboardTab === "all") {
     return BUCKETS.map((b) => `
       <h3>${bucketBadge(b)} ${esc(bucketLabel(b))}</h3>
-      ${bucketListHtml(data.ratings, b, watchInfo)}
+      ${bucketListHtml(data.ratings, b, watchInfo, offsets)}
     `).join("");
   }
-  return bucketListHtml(data.ratings, state.dashboardTab, watchInfo);
+  return bucketListHtml(data.ratings, state.dashboardTab, watchInfo, offsets);
 }
 
 async function renderDashboard() {
@@ -437,7 +693,7 @@ async function renderDashboard() {
     ${toolbarHtml()}
 
     <div class="movies-section">
-      <h2>My movies</h2>
+      <h2>My ${esc(MEDIA.plural)}</h2>
       <div class="bucket-tabs" role="tablist">
         ${["all", ...BUCKETS].map((tab) => `
           <button type="button" role="tab" data-tab="${tab}" aria-selected="${state.dashboardTab === tab}">
@@ -449,9 +705,9 @@ async function renderDashboard() {
     </div>
 
     <div class="movies-section">
-      <h2>Recently watched</h2>
+      <h2>Recently ${esc(MEDIA.verbPast)}</h2>
       ${recentWatches.length === 0
-        ? `<div class="notice">No watches logged yet.</div>`
+        ? `<div class="notice">No ${esc(MEDIA.verb)}s logged yet.</div>`
         : recentWatches.map((w) => {
             const withNames = (w.watch_event_participants ?? [])
               .map((p) => p.profiles?.display_name)
@@ -481,8 +737,8 @@ async function renderDashboard() {
               <div class="movie-row">
                 <div class="movie-row__body">
                   <a href="#/profile/${esc(encodeURIComponent(person?.username ?? ""))}">${esc(person?.display_name ?? "Someone")}</a>
-                  watched
-                  <a class="movie-row__title" href="#/movie/${esc(f.movie_id)}">${esc(movie?.title ?? "a movie")}</a>
+                  ${esc(MEDIA.verbPast)}
+                  <a class="movie-row__title" href="#/movie/${esc(f.movie_id)}">${esc(movie?.title ?? `a ${MEDIA.noun}`)}</a>
                   ${movie?.release_year ? `<span class="movie-row__year">(${esc(movie.release_year)})</span>` : ""}
                   <div class="movie-row__meta">${esc(f.watched_on ? fmtDate(f.watched_on) : fmtDate(f.created_at?.slice(0, 10)))}</div>
                 </div>
@@ -510,7 +766,7 @@ async function renderDashboard() {
 function newAddFlow() {
   return {
     step: "movie",
-    mode: tmdbConfigured() ? "search" : "manual",
+    mode: searchConfigured() ? "search" : "manual",
     searchQuery: "",
     title: "",
     year: "",
@@ -533,23 +789,23 @@ async function renderAddFlow() {
 
 function renderAddStepMovie() {
   const flow = state.addFlow;
-  if (tmdbConfigured() && flow.mode === "search") {
+  if (searchConfigured() && flow.mode === "search") {
     renderAddStepSearch();
     return;
   }
 
   setView(`
     ${toolbarHtml()}
-    <h2>Add a movie</h2>
+    <h2>Add a ${esc(MEDIA.noun)}</h2>
     <div class="movies-form">
       <form id="movie-form">
         <label for="movie-title">Title</label>
         <input type="text" id="movie-title" required value="${esc(flow.title)}">
-        <label for="movie-year">Release year (optional)</label>
-        <input type="number" id="movie-year" min="1880" max="2100" value="${esc(flow.year)}">
+        <label for="movie-year">${esc(MEDIA.yearLabel)}</label>
+        <input type="number" id="movie-year" min="1000" max="2100" value="${esc(flow.year)}">
         <div class="movies-form__actions">
           <button type="submit" class="btn">Continue</button>
-          ${tmdbConfigured() ? `<button type="button" class="btn btn--inverse" id="switch-to-search">Search instead</button>` : ""}
+          ${searchConfigured() ? `<button type="button" class="btn btn--inverse" id="switch-to-search">Search instead</button>` : ""}
           <a class="btn btn--inverse" href="#/">Cancel</a>
         </div>
       </form>
@@ -572,10 +828,11 @@ function renderAddStepMovie() {
     flow.year = root.querySelector("#movie-year").value.trim();
     if (!flow.title) return;
 
-    // Check for existing movies with a similar title so the same film is
+    // Check for existing entries with a similar title so the same item is
     // not added twice under slightly different spellings.
     const { data, error } = await sb.from("movies")
       .select("id, title, release_year")
+      .eq("media_type", MEDIA.key)
       .ilike("title", `%${flow.title}%`)
       .limit(8);
     if (error) {
@@ -601,17 +858,17 @@ function renderAddStepSearch() {
   const flow = state.addFlow;
   setView(`
     ${toolbarHtml()}
-    <h2>Add a movie</h2>
+    <h2>Add a ${esc(MEDIA.noun)}</h2>
     <div class="movies-form">
-      <label for="tmdb-search">Search for a movie</label>
-      <input type="text" id="tmdb-search" placeholder="e.g. Parasite" autocomplete="off" value="${esc(flow.searchQuery)}">
+      <label for="tmdb-search">Search for a ${esc(MEDIA.noun)}</label>
+      <input type="text" id="tmdb-search" placeholder="${esc(MEDIA.searchPlaceholder)}" autocomplete="off" value="${esc(flow.searchQuery)}">
       <ul class="movies-search-results" id="tmdb-results"></ul>
       <p class="movies-muted">
         Can't find it?
         <button type="button" class="btn btn--inverse btn--small-inline" id="switch-to-manual">Add it manually</button>
       </p>
       <p><a class="btn btn--inverse" href="#/">Cancel</a></p>
-      <p class="movies-muted">Search data from <a href="https://www.themoviedb.org" target="_blank" rel="noopener">TMDB</a>.</p>
+      <p class="movies-muted">${MEDIA.searchAttribution}</p>
     </div>
   `);
   bindToolbar();
@@ -634,6 +891,8 @@ function renderAddStepSearch() {
               : `<span class="tmdb-thumb tmdb-thumb--empty"></span>`}
             <span class="friend-row__name">${esc(m.title)}
               ${m.release_year ? `<span class="movies-muted">(${esc(m.release_year)})</span>` : ""}
+              ${m.director ? `<span class="movies-muted">${esc(MEDIA.credit)} ${esc(m.director)}</span>` : ""}
+              <span class="tmdb-ratings movies-muted" data-ext-id="${esc(m.tmdb_id ?? m.openlibrary_id ?? i)}"></span>
             </span>
             <button type="button" class="btn btn--inverse btn--small-inline" data-pick="${i}">Select</button>
           </li>
@@ -643,12 +902,24 @@ function renderAddStepSearch() {
       btn.addEventListener("click", async () => {
         const picked = movies[Number(btn.dataset.pick)];
         btn.disabled = true;
-        picked.director = await tmdbFetchDirector(picked.tmdb_id);
+        Object.assign(picked, await fetchMediaDetails(picked));
         flow.selectedMovie = { id: null, ...picked };
         flow.step = "details";
         renderAddFlow();
       });
     });
+
+    // Fill in IMDb / Rotten Tomatoes ratings as OMDb responds. Spans are
+    // keyed by TMDB id, so a late response can never label the wrong movie
+    // even if the user has typed a new search in the meantime.
+    if (omdbConfigured()) {
+      for (const m of movies) {
+        fetchExternalRatings(m).then((ratings) => {
+          const span = results.querySelector(`[data-ext-id="${m.tmdb_id}"]`);
+          if (span && ratings) span.textContent = extRatingsText(ratings);
+        });
+      }
+    }
   };
 
   let timer = null;
@@ -661,10 +932,10 @@ function renderAddStepSearch() {
     }
     timer = setTimeout(async () => {
       try {
-        const movies = await tmdbSearchMovies(flow.searchQuery);
+        const movies = await searchMedia(flow.searchQuery);
         renderResults(movies);
       } catch (err) {
-        results.innerHTML = `<li><span class="movies-muted">${esc(err.message)} — you can still add the movie manually.</span></li>`;
+        results.innerHTML = `<li><span class="movies-muted">${esc(err.message)} — you can still add the ${esc(MEDIA.noun)} manually.</span></li>`;
       }
     }, 300);
   });
@@ -684,7 +955,7 @@ function matchesHtml(matches) {
         </li>
       `).join("")}
     </ul>
-    <button type="button" class="btn btn--inverse" id="create-new-movie">No &mdash; add as a new movie</button>
+    <button type="button" class="btn btn--inverse" id="create-new-movie">No &mdash; add as a new ${esc(MEDIA.noun)}</button>
   `;
 }
 
@@ -708,15 +979,15 @@ function renderAddStepDetails() {
   const flow = state.addFlow;
   setView(`
     ${toolbarHtml()}
-    <h2>Log your watch</h2>
+    <h2>Log your ${esc(MEDIA.verb)}</h2>
     <p><strong>${esc(movieLabel(flow.selectedMovie))}</strong>
        <button type="button" class="btn btn--inverse btn--small-inline" id="change-movie">Change</button></p>
     <div class="movies-form">
       <form id="details-form">
-        <label for="watch-date">When did you watch it?</label>
+        <label for="watch-date">When did you ${esc(MEDIA.verb)} it?</label>
         <input type="date" id="watch-date" value="${esc(flow.watchedOn)}">
 
-        <label for="with-search">Watched with (search registered users)</label>
+        <label for="with-search">${esc(cap(MEDIA.verbPast))} with (search registered users)</label>
         <div id="with-chips">${withChipsHtml(flow.withUsers)}</div>
         <input type="text" id="with-search" placeholder="Search by name or username" autocomplete="off">
         <ul class="movies-search-results" id="with-results"></ul>
@@ -829,37 +1100,39 @@ async function saveWatch(flow) {
   const sel = flow.selectedMovie;
   let movieId = sel.id;
 
-  // A TMDB pick may already exist in our catalog (added by a friend):
+  // A search pick may already exist in our catalog (added by a friend):
   // reuse it instead of creating a duplicate.
-  if (!movieId && sel.tmdb_id) {
-    const { data: existing } = await sb.from("movies")
-      .select("id")
-      .eq("tmdb_id", sel.tmdb_id)
-      .maybeSingle();
-    if (existing) movieId = existing.id;
-  }
+  const findExisting = async () => {
+    let q = sb.from("movies").select("id").eq("media_type", MEDIA.key);
+    if (sel.tmdb_id) q = q.eq("tmdb_id", sel.tmdb_id);
+    else if (sel.openlibrary_id) q = q.eq("openlibrary_id", sel.openlibrary_id);
+    else return null;
+    const { data } = await q.maybeSingle();
+    return data?.id ?? null;
+  };
+
+  if (!movieId) movieId = await findExisting();
 
   if (!movieId) {
     const { data, error } = await sb.from("movies")
       .insert({
+        media_type: MEDIA.key,
         title: sel.title,
         release_year: sel.release_year ?? null,
         tmdb_id: sel.tmdb_id ?? null,
+        imdb_id: sel.imdb_id ?? null,
+        openlibrary_id: sel.openlibrary_id ?? null,
         poster_url: sel.poster_url ?? null,
         director: sel.director ?? null,
       })
       .select("id")
       .single();
     if (error) {
-      // Unique violation on tmdb_id: someone added it between our check and
-      // insert. Fall back to the existing row.
-      if (error.code === "23505" && sel.tmdb_id) {
-        const { data: raced } = await sb.from("movies")
-          .select("id")
-          .eq("tmdb_id", sel.tmdb_id)
-          .maybeSingle();
-        if (!raced) throw error;
-        movieId = raced.id;
+      // Unique violation: someone added it between our check and insert.
+      // Fall back to the existing row.
+      if (error.code === "23505") {
+        movieId = await findExisting();
+        if (!movieId) throw error;
       } else {
         throw error;
       }
@@ -928,7 +1201,7 @@ function renderBucketChoice() {
       `).join("")}
     </div>
     <p><a class="btn btn--inverse" href="#/">Cancel</a></p>
-    <p class="movies-muted">Cancelling keeps the watch logged; you can rate the movie later from its page.</p>
+    <p class="movies-muted">Cancelling keeps the ${esc(MEDIA.verb)} logged; you can rate the ${esc(MEDIA.noun)} later from its page.</p>
   `);
   bindToolbar();
 
@@ -951,6 +1224,7 @@ async function chooseBucket(bucket) {
   const { data, error } = await sb.from("ratings")
     .select("movie_id, rank_position, movies(id, title, release_year)")
     .eq("user_id", uid())
+    .eq("media_type", MEDIA.key)
     .eq("bucket", bucket)
     .neq("movie_id", flow.movie.id)
     .order("rank_position");
@@ -975,11 +1249,11 @@ function renderComparison() {
 
   setView(`
     ${toolbarHtml()}
-    <h2>Which movie did you like more?</h2>
+    <h2>Which ${esc(MEDIA.noun)} did you like more?</h2>
     <div class="compare-cards">
       <div class="compare-card">
         <div class="compare-card__title">${esc(movieLabel(flow.movie))}</div>
-        <div class="movies-muted">The movie you're ranking</div>
+        <div class="movies-muted">The ${esc(MEDIA.noun)} you're ranking</div>
         <button type="button" class="btn" id="prefer-new">I liked this more</button>
       </div>
       <div class="compare-vs">vs.</div>
@@ -1048,13 +1322,17 @@ async function finalizeRanking(insertionIndex) {
   });
   if (error) throw error;
 
-  const { data } = await sb.from("ratings")
-    .select("rank_position, score, bucket")
-    .eq("user_id", uid())
-    .eq("movie_id", flow.movie.id)
-    .single();
+  const [{ data }, { data: allMine }] = await Promise.all([
+    sb.from("ratings")
+      .select("rank_position, score, bucket")
+      .eq("user_id", uid())
+      .eq("movie_id", flow.movie.id)
+      .single(),
+    sb.from("ratings").select("bucket").eq("user_id", uid()).eq("media_type", MEDIA.key),
+  ]);
 
   flow.result = data;
+  flow.overallRank = overallRank(data, bucketOffsets(allMine ?? []));
   flow.step = "done";
   renderRankFlow();
 }
@@ -1067,12 +1345,11 @@ function renderRankDone() {
     <h2>Ranked!</h2>
     <div class="notice">
       <strong>${esc(movieLabel(flow.movie))}</strong> is now
-      #${r.rank_position + 1} in your ${esc(r.bucket)} list with a score of
-      ${scorePill(r.score, r.bucket)}.
+      ${bucketBadge(r.bucket)} ${scorePill(r.score, r.bucket)} ${rankPill(flow.overallRank, r.bucket)}
     </div>
     <p>
-      <a class="btn" href="#/">Back to my movies</a>
-      <a class="btn btn--inverse" href="#/movie/${esc(flow.movie.id)}">View movie</a>
+      <a class="btn" href="#/">Back to my ${esc(MEDIA.plural)}</a>
+      <a class="btn btn--inverse" href="#/movie/${esc(flow.movie.id)}">View ${esc(MEDIA.noun)}</a>
     </p>
   `);
   bindToolbar();
@@ -1086,9 +1363,10 @@ function renderRankDone() {
 async function renderMovieDetail(movieId) {
   loadingView();
 
-  const [movieRes, ratingRes, watchesRes, othersRes] = await Promise.all([
+  const [movieRes, ratingRes, allMineRes, watchesRes, othersRes] = await Promise.all([
     sb.from("movies").select("*").eq("id", movieId).maybeSingle(),
     sb.from("ratings").select("bucket, rank_position, score").eq("user_id", uid()).eq("movie_id", movieId).maybeSingle(),
+    sb.from("ratings").select("bucket").eq("user_id", uid()).eq("media_type", MEDIA.key),
     sb.from("watch_events")
       .select("id, watched_on, notes, created_at, watch_event_participants(profiles(username, display_name))")
       .eq("user_id", uid())
@@ -1104,6 +1382,7 @@ async function renderMovieDetail(movieId) {
   }
 
   const myRating = ratingRes.data;
+  const myOverallRank = myRating ? overallRank(myRating, bucketOffsets(allMineRes.data ?? [])) : null;
   const watches = watchesRes.data ?? [];
 
   let otherRatings = othersRes.data;
@@ -1134,27 +1413,27 @@ async function renderMovieDetail(movieId) {
   setView(`
     ${toolbarHtml()}
     <h2>${esc(movie.title)} ${movie.release_year ? `<span class="movie-row__year">(${esc(movie.release_year)})</span>` : ""}</h2>
-    ${movie.director ? `<p class="movies-muted">Directed by ${esc(movie.director)}</p>` : ""}
+    ${movie.director ? `<p class="movies-muted">${esc(MEDIA.credit)} ${esc(movie.director)}</p>` : ""}
+    <p class="movies-muted" id="ext-ratings" hidden></p>
     ${movie.poster_url ? `<img class="movie-poster" src="${esc(movie.poster_url)}" alt="Poster for ${esc(movie.title)}" loading="lazy">` : ""}
 
     <div class="movies-section">
       <h3>My rating</h3>
       ${myRating
-        ? `<p>${bucketBadge(myRating.bucket)} ${scorePill(myRating.score, myRating.bucket)}
-             &mdash; #${myRating.rank_position + 1} in my ${esc(myRating.bucket)} list</p>`
-        : `<div class="notice">You have not rated this movie yet.</div>`}
+        ? `<p>${bucketBadge(myRating.bucket)} ${scorePill(myRating.score, myRating.bucket)} ${rankPill(myOverallRank, myRating.bucket)}</p>`
+        : `<div class="notice">You have not rated this ${esc(MEDIA.noun)} yet.</div>`}
       <p>
-        <button type="button" class="btn" id="rate-btn">${myRating ? "Re-rank / change bucket" : "Rate this movie"}</button>
-        <button type="button" class="btn btn--inverse" id="log-watch-btn">Log another watch</button>
+        <button type="button" class="btn" id="rate-btn">${myRating ? "Re-rank / change bucket" : `Rate this ${esc(MEDIA.noun)}`}</button>
+        <button type="button" class="btn btn--inverse" id="log-watch-btn">Log another ${esc(MEDIA.verb)}</button>
         ${myRating ? `<button type="button" class="btn btn--inverse" id="delete-rating-btn">Remove rating</button>` : ""}
       </p>
       <div id="log-watch-area"></div>
     </div>
 
     <div class="movies-section">
-      <h3>My watch history</h3>
+      <h3>My ${esc(MEDIA.verb)} history</h3>
       ${watches.length === 0
-        ? `<div class="notice">No watches logged for this movie.</div>`
+        ? `<div class="notice">No ${esc(MEDIA.verb)}s logged for this ${esc(MEDIA.noun)}.</div>`
         : watches.map((w) => {
             const withNames = (w.watch_event_participants ?? [])
               .map((p) => p.profiles?.display_name).filter(Boolean);
@@ -1177,7 +1456,7 @@ async function renderMovieDetail(movieId) {
         ? `<p class="movies-muted">Average: <strong>${esc(avgScore)}</strong> across ${allScores.length} ratings</p>`
         : ""}
       ${otherRatings.length === 0
-        ? `<div class="notice">No one else has rated this movie yet.</div>`
+        ? `<div class="notice">No one else has rated this ${esc(MEDIA.noun)} yet.</div>`
         : otherRatings.map((r) => {
             const p = otherProfiles.get(r.user_id);
             return `
@@ -1192,16 +1471,29 @@ async function renderMovieDetail(movieId) {
           }).join("")}
     </div>
 
-    <p><a class="btn btn--inverse" href="#/">Back to my movies</a></p>
+    <p><a class="btn btn--inverse" href="#/">Back to my ${esc(MEDIA.plural)}</a></p>
   `);
   bindToolbar();
+
+  // External ratings load after the page renders so a slow (or down) OMDb
+  // never delays the movie page itself.
+  if (omdbConfigured()) {
+    fetchExternalRatings(movie).then((ratings) => {
+      const p = root.querySelector("#ext-ratings");
+      const text = extRatingsText(ratings);
+      if (p && text) {
+        p.textContent = text;
+        p.hidden = false;
+      }
+    });
+  }
 
   root.querySelector("#rate-btn").addEventListener("click", () => {
     startRanking({ id: movie.id, title: movie.title, release_year: movie.release_year });
   });
 
   root.querySelector("#delete-rating-btn")?.addEventListener("click", async () => {
-    if (!confirm(`Remove your rating for "${movie.title}"? Your watch history is kept.`)) return;
+    if (!confirm(`Remove your rating for "${movie.title}"? Your ${MEDIA.verb} history is kept.`)) return;
     const { error } = await sb.rpc("remove_rating", { p_movie_id: movie.id });
     if (error) {
       showErrorIn(root, error.message);
@@ -1214,16 +1506,16 @@ async function renderMovieDetail(movieId) {
     const area = root.querySelector("#log-watch-area");
     area.innerHTML = `
       <form id="rewatch-form" class="movies-form">
-        <label for="rewatch-date">Watched on</label>
+        <label for="rewatch-date">${esc(cap(MEDIA.verbPast))} on</label>
         <input type="date" id="rewatch-date" value="${esc(todayStr())}">
-        <label for="rewatch-search">Watched with</label>
+        <label for="rewatch-search">${esc(cap(MEDIA.verbPast))} with</label>
         <div id="with-chips"></div>
         <input type="text" id="with-search" placeholder="Search by name or username" autocomplete="off">
         <ul class="movies-search-results" id="with-results"></ul>
         <label for="rewatch-notes">Private notes (optional)</label>
         <textarea id="rewatch-notes" rows="2"></textarea>
         <div class="movies-form__actions">
-          <button type="submit" class="btn">Save watch</button>
+          <button type="submit" class="btn">Save ${esc(MEDIA.verb)}</button>
         </div>
       </form>
     `;
@@ -1436,6 +1728,7 @@ async function renderProfilePage(username) {
   const { data: ratings } = await sb.from("ratings")
     .select("movie_id, bucket, rank_position, score, movies(id, title, release_year)")
     .eq("user_id", person.id)
+    .eq("media_type", MEDIA.key)
     .order("rank_position");
 
   const { data: friendship } = await sb.from("friendships")
@@ -1458,13 +1751,14 @@ async function renderProfilePage(username) {
     ` : ""}
 
     ${isFriend ? BUCKETS.map((b) => {
+      const offsets = bucketOffsets(ratings ?? []);
       const list = (ratings ?? []).filter((r) => r.bucket === b).sort((x, y) => x.rank_position - y.rank_position);
       return `
         <div class="movies-section">
           <h3>${bucketBadge(b)} ${esc(bucketLabel(b))}</h3>
           ${list.length === 0 ? `<div class="notice">Nothing here yet.</div>` : list.map((r) => `
             <div class="movie-row">
-              <span class="movie-row__rank">${r.rank_position + 1}.</span>
+              <span class="movie-row__rank">${overallRank(r, offsets)}.</span>
               ${scorePill(r.score, r.bucket)}
               <div class="movie-row__body">
                 <a class="movie-row__title" href="#/movie/${esc(r.movie_id)}">${esc(r.movies?.title ?? "Unknown")}</a>
@@ -1524,6 +1818,7 @@ function init() {
       state.profile = null;
       state.addFlow = null;
       state.rankFlow = null;
+      state.showAuth = false; // logging out returns to the public rankings
     }
     if (!!session !== hadSession) render();
   });

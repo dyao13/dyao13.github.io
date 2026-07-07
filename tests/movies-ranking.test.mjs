@@ -13,6 +13,8 @@ import {
   nextComparisonIndex,
   applyComparison,
   insertAt,
+  bucketOffsets,
+  overallRank,
 } from "../assets/js/movies-ranking.js";
 
 let passed = 0;
@@ -198,6 +200,42 @@ test("moving a movie between buckets rescores both buckets", () => {
   // green 4 -> 3 after the move; yellow 2 -> 3 after the move.
   assert.deepEqual(bucketScores(3, "green"), ["10.0", "8.4", "6.7"]);
   assert.deepEqual(bucketScores(3, "yellow"), ["6.7", "5.1", "3.4"]);
+});
+
+/* ---- Unified numbering across colors ---- */
+
+test("numbering continues from green through yellow through red", () => {
+  const ratings = [
+    { bucket: "green", rank_position: 0 },
+    { bucket: "green", rank_position: 1 },
+    { bucket: "green", rank_position: 2 },
+    { bucket: "yellow", rank_position: 0 },
+    { bucket: "yellow", rank_position: 1 },
+    { bucket: "red", rank_position: 0 },
+  ];
+  const offsets = bucketOffsets(ratings);
+  assert.deepEqual(offsets, { green: 0, yellow: 3, red: 5 });
+  assert.deepEqual(ratings.map((r) => overallRank(r, offsets)), [1, 2, 3, 4, 5, 6]);
+});
+
+test("unified numbering with empty buckets", () => {
+  // Only red movies: numbering still starts at 1.
+  const onlyRed = [{ bucket: "red", rank_position: 0 }, { bucket: "red", rank_position: 1 }];
+  const redOffsets = bucketOffsets(onlyRed);
+  assert.deepEqual(onlyRed.map((r) => overallRank(r, redOffsets)), [1, 2]);
+
+  // Green and red but no yellow: red picks up right after green.
+  const noYellow = [
+    { bucket: "green", rank_position: 0 },
+    { bucket: "red", rank_position: 0 },
+  ];
+  const offsets = bucketOffsets(noYellow);
+  assert.equal(overallRank(noYellow[0], offsets), 1);
+  assert.equal(overallRank(noYellow[1], offsets), 2);
+});
+
+test("bucketOffsets rejects unknown buckets", () => {
+  assert.throws(() => bucketOffsets([{ bucket: "blue", rank_position: 0 }]));
 });
 
 console.log(`\n${passed} tests passed.`);

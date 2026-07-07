@@ -339,6 +339,11 @@ $movies-red: #c92a2a;
     background-color: $lighter-gray;
   }
 
+  .tmdb-ratings {
+    display: block;
+    font-size: $type-size-7;
+  }
+
   /* ---- friend list rows ---- */
 
   .friend-row {

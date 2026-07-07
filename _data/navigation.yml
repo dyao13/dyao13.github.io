@@ -31,8 +31,14 @@ main:
     url: https://github.com/dyao13/CV/blob/main/yao_cv/yao_cv.pdf
     target: "_blank"
 
+  - title: "Books"
+    url: /books/
+
   - title: "Movies"
     url: /movies/
+
+  - title: "Shows"
+    url: /shows/
     
   # - title: "Guide"
   #   url: /markdown/

@@ -1,7 +1,9 @@
 # MovieRank — Supabase setup
 
-The `/movies/` page on the site is a static shell; all auth, data, and
-privacy rules live in [Supabase](https://supabase.com). One-time setup:
+The `/books/`, `/movies/`, and `/shows/` pages on the site are static
+shells sharing one app; all auth, data, and privacy rules live in
+[Supabase](https://supabase.com). Each medium has fully independent
+green/yellow/red lists per user. One-time setup:
 
 ## 1. Create a Supabase project
 
@@ -88,6 +90,21 @@ years, posters, and directors fill in automatically:
 
 Without a key, the app falls back to manual title/year entry.
 
+### IMDb / Rotten Tomatoes ratings (OMDb) — optional
+
+With an [OMDb](https://www.omdbapi.com) key, search results and movie
+detail pages also show the IMDb rating and the Rotten Tomatoes critics
+score (the audience score has no public API):
+
+1. Request a free key at <https://www.omdbapi.com/apikey.aspx>
+   (1,000 requests/day tier).
+2. Activate it via the link OMDb emails you.
+3. Paste it into `OMDB_API_KEY` in
+   [`assets/js/movies-config.js`](../assets/js/movies-config.js).
+4. Run [`migration-004-imdb-id.sql`](migration-004-imdb-id.sql) once in the
+   SQL editor (adds `movies.imdb_id` for precise lookups; fresh installs
+   of `schema.sql` already have it).
+
 ## 7. Community ratings
 
 The movie detail page shows what every member rated a movie (plus the
@@ -96,6 +113,42 @@ average) via the `movie_ratings_visible` view. Members who set
 friends. If you ran `schema.sql` before this view existed, run
 [`migration-002-community-ratings.sql`](migration-002-community-ratings.sql)
 once in the SQL editor.
+
+## 8. Public rankings (logged-out view)
+
+Logged-out visitors to `/movies/` can see one account's ranked lists
+(read-only). Two switches control this:
+
+1. `PUBLIC_PROFILE_USERNAME` in
+   [`assets/js/movies-config.js`](../assets/js/movies-config.js) — which
+   account to display (set to `""` to show only the login screen).
+2. `profiles.is_public` in the database — run
+   [`migration-005-public-profile.sql`](migration-005-public-profile.sql)
+   once; it adds the flag, creates the anonymous-readable
+   `public_rankings` view, and marks your account public.
+
+Only bucket, rank, score, and movie info are exposed — watch history,
+notes, friends, and all other accounts stay login-only.
+
+## 9. Books and TV shows
+
+The same app powers three pages, selected by `data-media-type` on the
+mount div (`movie`, `book`, `tv`). Search providers per medium:
+
+- Movies and shows: TMDB (needs `TMDB_API_KEY`), plus OMDb ratings.
+- Books: [Open Library](https://openlibrary.org) — no key needed. No
+  IMDb/Rotten Tomatoes ratings for books.
+
+If your database predates this feature, run
+[`migration-006-media-types.sql`](migration-006-media-types.sql) once in
+the SQL editor. It backfills all existing data as `movie`.
+
+## Migrations, in order
+
+If you set up the database from an older `schema.sql`, run any migration
+files you have not yet applied, in numeric order (002 → 006). A fresh
+`schema.sql` install needs none of them except the personal `update`
+statement at the end of migration 005.
 
 ## Ranking data model (for reference)
 

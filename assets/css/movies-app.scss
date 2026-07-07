@@ -19,6 +19,13 @@ $movies-red: #c92a2a;
 
   /* ---- layout helpers ---- */
 
+  .btn,
+  .btn:hover,
+  .btn:focus,
+  .btn:visited {
+    text-decoration: none;
+  }
+
   .movies-section {
     margin-bottom: 2em;
   }
@@ -118,6 +125,7 @@ $movies-red: #c92a2a;
     font-size: 0.85em;
     font-weight: bold;
     text-align: center;
+    text-decoration: none;
   }
 
   .bucket-badge--green {
@@ -148,6 +156,7 @@ $movies-red: #c92a2a;
     font-size: 0.85em;
     font-weight: bold;
     text-align: center;
+    text-decoration: none;
   }
 
   .score-pill--green {
@@ -163,6 +172,18 @@ $movies-red: #c92a2a;
   .score-pill--red {
     border: 1px solid $movies-red;
     color: $movies-red;
+  }
+
+  .rating-pills {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35em;
+  }
+
+  .pill--compact {
+    width: auto;
+    min-width: 0;
   }
 
   /* ---- bucket picker buttons ---- */

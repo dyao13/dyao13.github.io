@@ -162,16 +162,16 @@ function showErrorIn(container, message) {
   container.prepend(box);
 }
 
-function bucketBadge(bucket) {
-  return `<span class="bucket-badge bucket-badge--${esc(bucket)}">${esc(bucketLabel(bucket))}</span>`;
+function bucketBadge(bucket, extraClass = "") {
+  return `<span class="bucket-badge bucket-badge--${esc(bucket)} ${esc(extraClass)}">${esc(bucketLabel(bucket))}</span>`;
 }
 
-function scorePill(score, bucket) {
-  return `<span class="score-pill score-pill--${esc(bucket)}">${esc(formatScore(score))}</span>`;
+function scorePill(score, bucket, extraClass = "") {
+  return `<span class="score-pill score-pill--${esc(bucket)} ${esc(extraClass)}">${esc(formatScore(score))}</span>`;
 }
 
-function rankPill(rank, bucket) {
-  return `<span class="score-pill score-pill--${esc(bucket)}">#${esc(rank)}</span>`;
+function rankPill(rank, bucket, extraClass = "") {
+  return `<span class="score-pill score-pill--${esc(bucket)} ${esc(extraClass)}">#${esc(rank)}</span>`;
 }
 
 function movieLabel(movie) {
@@ -590,9 +590,9 @@ function toolbarHtml() {
   return `
     <p class="movies-tagline">A ranking app for friends</p>
     <div class="movies-toolbar">
-      <a class="btn" href="#/add">+ Add ${esc(MEDIA.noun)}</a>
+      <a class="btn" href="#/add">Add ${esc(MEDIA.noun)}</a>
       <a class="btn btn--inverse" href="#/">My ${esc(MEDIA.plural)}</a>
-      <a class="btn btn--inverse" href="#/friends">Friends</a>
+      <a class="btn btn--inverse" href="#/friends">My friends</a>
       <button class="btn btn--inverse" id="logout-btn" type="button">Log out</button>
       <span class="movies-muted">Signed in as ${esc(state.profile.display_name)} (@${esc(state.profile.username)})</span>
     </div>
@@ -1473,10 +1473,10 @@ async function renderMovieDetail(movieId) {
     <div class="movies-section">
       <h3>My rating</h3>
       ${myRating
-        ? `<p>${bucketBadge(myRating.bucket)} ${scorePill(myRating.score, myRating.bucket)} ${rankPill(myOverallRank, myRating.bucket)}</p>`
+        ? `<p class="rating-pills">${bucketBadge(myRating.bucket, "pill--compact")} ${scorePill(myRating.score, myRating.bucket, "pill--compact")} ${rankPill(myOverallRank, myRating.bucket, "pill--compact")}</p>`
         : `<div class="notice">You have not rated this ${esc(MEDIA.noun)} yet.</div>`}
       <p>
-        <button type="button" class="btn" id="rate-btn">${myRating ? "Re-rank / change bucket" : `Rate this ${esc(MEDIA.noun)}`}</button>
+        <button type="button" class="btn" id="rate-btn">${myRating ? "Re-rank" : `Rate this ${esc(MEDIA.noun)}`}</button>
         <button type="button" class="btn btn--inverse" id="log-watch-btn">Log another ${esc(MEDIA.verb)}</button>
         ${myRating ? `<button type="button" class="btn btn--inverse" id="delete-rating-btn">Remove rating</button>` : ""}
       </p>

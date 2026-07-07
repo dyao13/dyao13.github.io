@@ -23,11 +23,19 @@ $movies-red: #c92a2a;
     margin-bottom: 2em;
   }
 
+  .movies-tagline {
+    margin-bottom: 0.5em;
+  }
+
   .movies-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35em;
     margin-bottom: 1.5em;
 
     .btn {
-      margin-right: 0.25em;
+      margin-right: 0;
     }
   }
 
@@ -102,11 +110,14 @@ $movies-red: #c92a2a;
 
   .bucket-badge {
     display: inline-block;
-    padding: 0.15rem 0.5rem;
+    box-sizing: border-box;
+    width: 11em;
+    padding: 0.1rem 0.4rem;
     border-radius: 0.25rem;
-    font-size: 0.75em;
+    font-family: $monospace;
+    font-size: 0.85em;
     font-weight: bold;
-    font-family: $sans-serif;
+    text-align: center;
   }
 
   .bucket-badge--green {
@@ -129,7 +140,8 @@ $movies-red: #c92a2a;
 
   .score-pill {
     display: inline-block;
-    min-width: 2.4em;
+    box-sizing: border-box;
+    width: 3.25em;
     padding: 0.1rem 0.4rem;
     border-radius: 0.25rem;
     font-family: $monospace;

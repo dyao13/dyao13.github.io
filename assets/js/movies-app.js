@@ -39,11 +39,14 @@ const root = document.getElementById("movies-app");
 const MEDIA_TYPES = {
   movie: {
     key: "movie",
+    label: "Movies",
+    path: "/movies/",
     noun: "movie",
     plural: "movies",
     credit: "Directed by",
     verb: "watch",
     verbPast: "watched",
+    eventPlural: "watches",
     yearLabel: "Release year (optional)",
     searchPlaceholder: "e.g. Parasite",
     searchAttribution: `Search data from <a href="https://www.themoviedb.org" target="_blank" rel="noopener">TMDB</a>.`,
@@ -51,23 +54,29 @@ const MEDIA_TYPES = {
   },
   book: {
     key: "book",
+    label: "Books",
+    path: "/books/",
     noun: "book",
     plural: "books",
     credit: "By",
     verb: "read",
     verbPast: "read",
+    eventPlural: "reads",
     yearLabel: "First published (optional)",
-    searchPlaceholder: "e.g. East of Eden",
+    searchPlaceholder: "Title or ISBN, e.g. East of Eden or 9780140186390",
     searchAttribution: `Search data from <a href="https://openlibrary.org" target="_blank" rel="noopener">Open Library</a>.`,
     omdbType: null, // no IMDb/RT ratings for books
   },
   tv: {
     key: "tv",
+    label: "Shows",
+    path: "/shows/",
     noun: "show",
     plural: "shows",
     credit: "Created by",
     verb: "watch",
     verbPast: "watched",
+    eventPlural: "watches",
     yearLabel: "First aired (optional)",
     searchPlaceholder: "e.g. Severance",
     searchAttribution: `Search data from <a href="https://www.themoviedb.org" target="_blank" rel="noopener">TMDB</a>.`,
@@ -75,7 +84,17 @@ const MEDIA_TYPES = {
   },
 };
 
-const MEDIA = MEDIA_TYPES[root?.dataset.mediaType] ?? MEDIA_TYPES.movie;
+function currentMediaKey() {
+  const declared = root?.dataset.mediaType;
+  if (MEDIA_TYPES[declared]) return declared;
+
+  const path = location.pathname.replace(/\/+/g, "/").toLowerCase();
+  if (path.startsWith("/books/")) return "book";
+  if (path.startsWith("/shows/")) return "tv";
+  return "movie";
+}
+
+const MEDIA = MEDIA_TYPES[currentMediaKey()] ?? MEDIA_TYPES.movie;
 
 const state = {
   session: null,
@@ -144,7 +163,7 @@ function showErrorIn(container, message) {
 }
 
 function bucketBadge(bucket) {
-  return `<span class="bucket-badge bucket-badge--${esc(bucket)}">${esc(bucket[0].toUpperCase() + bucket.slice(1))}</span>`;
+  return `<span class="bucket-badge bucket-badge--${esc(bucket)}">${esc(bucketLabel(bucket))}</span>`;
 }
 
 function scorePill(score, bucket) {
@@ -214,16 +233,23 @@ function searchConfigured() {
   return MEDIA.key === "book" ? true : tmdbConfigured(); // Open Library needs no key
 }
 
+function normalizedIsbn(query) {
+  const compact = query.toUpperCase().replace(/[^0-9X]/g, "");
+  return /^(\d{9}[\dX]|\d{13})$/.test(compact) ? compact : null;
+}
+
 async function searchMedia(query) {
   if (MEDIA.key === "book") {
+    const isbn = normalizedIsbn(query);
     const url = new URL("https://openlibrary.org/search.json");
-    url.searchParams.set("q", query);
+    url.searchParams.set(isbn ? "isbn" : "q", isbn ?? query);
     url.searchParams.set("limit", "8");
-    url.searchParams.set("fields", "key,title,first_publish_year,cover_i,author_name");
+    url.searchParams.set("fields", "key,title,first_publish_year,cover_i,author_name,isbn");
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Book search failed (Open Library ${res.status})`);
     const data = await res.json();
     return (data.docs ?? []).map((d) => ({
+      isbn: isbn && (d.isbn ?? []).includes(isbn) ? isbn : d.isbn?.[0] ?? null,
       openlibrary_id: d.key,
       title: d.title,
       release_year: d.first_publish_year ?? null,
@@ -315,6 +341,11 @@ function extRatingsText(ratings) {
   return parts.join(" · ");
 }
 
+function missingColumnName(error) {
+  const text = [error?.message, error?.details, error?.hint].filter(Boolean).join(" ");
+  return text.match(/'([^']+)' column/)?.[1] ?? text.match(/column "([^"]+)"/)?.[1] ?? null;
+}
+
 /* ------------------------------------------------------------------ */
 /* Routing                                                             */
 /* ------------------------------------------------------------------ */
@@ -385,6 +416,7 @@ async function renderPublicDashboard() {
     .order("rank_position");
 
   const showLoginButton = `
+    <p class="movies-tagline">A ranking app for friends</p>
     <div class="movies-toolbar">
       <button type="button" class="btn" id="show-login">Log in / Sign up</button>
     </div>
@@ -393,7 +425,6 @@ async function renderPublicDashboard() {
   if (error || !data || data.length === 0) {
     setView(`
       ${showLoginButton}
-      <p>A ranking app for friends.</p>
       <div class="notice">
         ${error
           ? "Public rankings are not available. (Has migration 005 been run in Supabase?)"
@@ -414,7 +445,7 @@ async function renderPublicDashboard() {
       const list = data.filter((r) => r.bucket === b).sort((x, y) => x.rank_position - y.rank_position);
       return `
         <div class="movies-section">
-          <h3>${bucketBadge(b)} ${esc(bucketLabel(b))}</h3>
+          <h3>${bucketBadge(b)}</h3>
           ${list.length === 0 ? `<div class="notice">Nothing here yet.</div>` : list.map((r) => `
             <div class="movie-row movie-row--${esc(r.bucket)}">
               <span class="movie-row__rank">${overallRank(r, offsets)}.</span>
@@ -428,7 +459,7 @@ async function renderPublicDashboard() {
         </div>
       `;
     }).join("")}
-    <p class="movies-muted">A private ${esc(MEDIA.noun)} ranking app for friends &mdash; log in to rank your own.</p>
+    <p class="movies-muted">A ranking app for friends &mdash; log in to rank your own</p>
   `);
   bindShowLogin();
 }
@@ -447,7 +478,7 @@ function bindShowLogin() {
 function renderAuth() {
   const isSignup = state.authMode === "signup";
   setView(`
-    <p>A ranking app for friends.</p>
+    <p class="movies-tagline">A ranking app for friends</p>
     <div class="movies-form">
       <form id="auth-form">
         <label for="auth-email">Email</label>
@@ -557,6 +588,7 @@ function renderProfileSetup() {
 
 function toolbarHtml() {
   return `
+    <p class="movies-tagline">A ranking app for friends</p>
     <div class="movies-toolbar">
       <a class="btn" href="#/add">+ Add ${esc(MEDIA.noun)}</a>
       <a class="btn btn--inverse" href="#/">My ${esc(MEDIA.plural)}</a>
@@ -578,9 +610,10 @@ function bindToolbar() {
 async function loadDashboardData() {
   const [ratingsRes, watchesRes, feedRes] = await Promise.all([
     sb.from("ratings")
-      .select("movie_id, bucket, rank_position, score, movies(id, title, release_year)")
+      .select("movie_id, bucket, rank_position, score, movies!inner(id, title, release_year, media_type)")
       .eq("user_id", uid())
       .eq("media_type", MEDIA.key)
+      .eq("movies.media_type", MEDIA.key)
       .order("rank_position"),
     sb.from("watch_events")
       .select("id, movie_id, watched_on, created_at, movies!inner(title, release_year, media_type), watch_event_participants(profiles(username, display_name))")
@@ -608,7 +641,7 @@ async function loadDashboardData() {
     const movieIds = [...new Set(feed.map((f) => f.movie_id))];
     const userIds = [...new Set(feed.map((f) => f.user_id))];
     const [moviesRes, profilesRes] = await Promise.all([
-      sb.from("movies").select("id, title, release_year").in("id", movieIds),
+      sb.from("movies").select("id, title, release_year").eq("media_type", MEDIA.key).in("id", movieIds),
       sb.from("profiles").select("id, username, display_name").in("id", userIds),
     ]);
     feedMovies = new Map((moviesRes.data ?? []).map((m) => [m.id, m]));
@@ -669,7 +702,7 @@ function dashboardListHtml(data) {
   }
   if (state.dashboardTab === "all") {
     return BUCKETS.map((b) => `
-      <h3>${bucketBadge(b)} ${esc(bucketLabel(b))}</h3>
+      <h3>${bucketBadge(b)}</h3>
       ${bucketListHtml(data.ratings, b, watchInfo, offsets)}
     `).join("");
   }
@@ -682,7 +715,7 @@ async function renderDashboard() {
   try {
     data = await loadDashboardData();
   } catch (err) {
-    setView(errorHtml(`Could not load your movies: ${err.message}`));
+    setView(errorHtml(`Could not load your ${MEDIA.plural}: ${err.message}`));
     return;
   }
   state.dashboardData = data;
@@ -707,7 +740,7 @@ async function renderDashboard() {
     <div class="movies-section">
       <h2>Recently ${esc(MEDIA.verbPast)}</h2>
       ${recentWatches.length === 0
-        ? `<div class="notice">No ${esc(MEDIA.verb)}s logged yet.</div>`
+        ? `<div class="notice">No ${esc(MEDIA.eventPlural)} logged yet.</div>`
         : recentWatches.map((w) => {
             const withNames = (w.watch_event_participants ?? [])
               .map((p) => p.profiles?.display_name)
@@ -892,6 +925,7 @@ function renderAddStepSearch() {
             <span class="friend-row__name">${esc(m.title)}
               ${m.release_year ? `<span class="movies-muted">(${esc(m.release_year)})</span>` : ""}
               ${m.director ? `<span class="movies-muted">${esc(MEDIA.credit)} ${esc(m.director)}</span>` : ""}
+              ${m.isbn ? `<span class="movies-muted">ISBN ${esc(m.isbn)}</span>` : ""}
               <span class="tmdb-ratings movies-muted" data-ext-id="${esc(m.tmdb_id ?? m.openlibrary_id ?? i)}"></span>
             </span>
             <button type="button" class="btn btn--inverse btn--small-inline" data-pick="${i}">Select</button>
@@ -979,7 +1013,7 @@ function renderAddStepDetails() {
   const flow = state.addFlow;
   setView(`
     ${toolbarHtml()}
-    <h2>Log your ${esc(MEDIA.verb)}</h2>
+    <h2>Log this ${esc(MEDIA.noun)}</h2>
     <p><strong>${esc(movieLabel(flow.selectedMovie))}</strong>
        <button type="button" class="btn btn--inverse btn--small-inline" id="change-movie">Change</button></p>
     <div class="movies-form">
@@ -1114,19 +1148,31 @@ async function saveWatch(flow) {
   if (!movieId) movieId = await findExisting();
 
   if (!movieId) {
-    const { data, error } = await sb.from("movies")
-      .insert({
-        media_type: MEDIA.key,
-        title: sel.title,
-        release_year: sel.release_year ?? null,
-        tmdb_id: sel.tmdb_id ?? null,
-        imdb_id: sel.imdb_id ?? null,
-        openlibrary_id: sel.openlibrary_id ?? null,
-        poster_url: sel.poster_url ?? null,
-        director: sel.director ?? null,
-      })
+    const insertPayload = {
+      media_type: MEDIA.key,
+      title: sel.title,
+      release_year: sel.release_year ?? null,
+      tmdb_id: sel.tmdb_id ?? null,
+      imdb_id: sel.imdb_id ?? null,
+      openlibrary_id: sel.openlibrary_id ?? null,
+      poster_url: sel.poster_url ?? null,
+      director: sel.director ?? null,
+    };
+    let { data, error } = await sb.from("movies")
+      .insert(insertPayload)
       .select("id")
       .single();
+
+    const missingColumn = missingColumnName(error);
+    if (missingColumn && ["imdb_id"].includes(missingColumn)) {
+      const fallbackPayload = { ...insertPayload };
+      delete fallbackPayload[missingColumn];
+      ({ data, error } = await sb.from("movies")
+        .insert(fallbackPayload)
+        .select("id")
+        .single());
+    }
+
     if (error) {
       // Unique violation: someone added it between our check and insert.
       // Fall back to the existing row.
@@ -1196,7 +1242,7 @@ function renderBucketChoice() {
     <div class="bucket-picker">
       ${BUCKETS.map((b) => `
         <button type="button" class="bucket-picker__${b}" data-bucket="${b}">
-          ${bucketBadge(b)} ${esc(bucketLabel(b))}
+          ${bucketBadge(b)}
         </button>
       `).join("")}
     </div>
@@ -1222,9 +1268,10 @@ async function chooseBucket(bucket) {
   flow.bucket = bucket;
 
   const { data, error } = await sb.from("ratings")
-    .select("movie_id, rank_position, movies(id, title, release_year)")
+    .select("movie_id, rank_position, movies!inner(id, title, release_year, media_type)")
     .eq("user_id", uid())
     .eq("media_type", MEDIA.key)
+    .eq("movies.media_type", MEDIA.key)
     .eq("bucket", bucket)
     .neq("movie_id", flow.movie.id)
     .order("rank_position");
@@ -1292,7 +1339,7 @@ function renderComparison() {
         setView(`
           ${toolbarHtml()}
           ${errorHtml(err.message || "Could not save the ranking.")}
-          <p><a class="btn" href="#/movie/${esc(flow.movie.id)}">Back to the movie</a></p>
+          <p><a class="btn" href="#/movie/${esc(flow.movie.id)}">Back to the ${esc(MEDIA.noun)}</a></p>
         `);
         bindToolbar();
         state.rankFlow = null;
@@ -1364,20 +1411,26 @@ async function renderMovieDetail(movieId) {
   loadingView();
 
   const [movieRes, ratingRes, allMineRes, watchesRes, othersRes] = await Promise.all([
-    sb.from("movies").select("*").eq("id", movieId).maybeSingle(),
-    sb.from("ratings").select("bucket, rank_position, score").eq("user_id", uid()).eq("movie_id", movieId).maybeSingle(),
-    sb.from("ratings").select("bucket").eq("user_id", uid()).eq("media_type", MEDIA.key),
-    sb.from("watch_events")
-      .select("id, watched_on, notes, created_at, watch_event_participants(profiles(username, display_name))")
+    sb.from("movies").select("*").eq("id", movieId).eq("media_type", MEDIA.key).maybeSingle(),
+    sb.from("ratings")
+      .select("bucket, rank_position, score")
       .eq("user_id", uid())
       .eq("movie_id", movieId)
+      .eq("media_type", MEDIA.key)
+      .maybeSingle(),
+    sb.from("ratings").select("bucket").eq("user_id", uid()).eq("media_type", MEDIA.key),
+    sb.from("watch_events")
+      .select("id, watched_on, notes, created_at, movies!inner(media_type), watch_event_participants(profiles(username, display_name))")
+      .eq("user_id", uid())
+      .eq("movie_id", movieId)
+      .eq("movies.media_type", MEDIA.key)
       .order("watched_on", { ascending: false, nullsFirst: false }),
     sb.from("movie_ratings_visible").select("user_id, bucket, score").eq("movie_id", movieId).neq("user_id", uid()),
   ]);
 
   const movie = movieRes.data;
   if (!movie) {
-    setView(`${errorHtml("Movie not found.")}<p><a class="btn" href="#/">Back</a></p>`);
+    setView(`${errorHtml(`${cap(MEDIA.noun)} not found.`)}<p><a class="btn" href="#/">Back</a></p>`);
     return;
   }
 
@@ -1433,7 +1486,7 @@ async function renderMovieDetail(movieId) {
     <div class="movies-section">
       <h3>My ${esc(MEDIA.verb)} history</h3>
       ${watches.length === 0
-        ? `<div class="notice">No ${esc(MEDIA.verb)}s logged for this ${esc(MEDIA.noun)}.</div>`
+        ? `<div class="notice">No ${esc(MEDIA.eventPlural)} logged for this ${esc(MEDIA.noun)}.</div>`
         : watches.map((w) => {
             const withNames = (w.watch_event_participants ?? [])
               .map((p) => p.profiles?.display_name).filter(Boolean);
@@ -1726,9 +1779,10 @@ async function renderProfilePage(username) {
   // RLS only returns rows for accepted friends, so an empty result for a
   // non-friend is expected — not an error.
   const { data: ratings } = await sb.from("ratings")
-    .select("movie_id, bucket, rank_position, score, movies(id, title, release_year)")
+    .select("movie_id, bucket, rank_position, score, movies!inner(id, title, release_year, media_type)")
     .eq("user_id", person.id)
     .eq("media_type", MEDIA.key)
+    .eq("movies.media_type", MEDIA.key)
     .order("rank_position");
 
   const { data: friendship } = await sb.from("friendships")
@@ -1755,7 +1809,7 @@ async function renderProfilePage(username) {
       const list = (ratings ?? []).filter((r) => r.bucket === b).sort((x, y) => x.rank_position - y.rank_position);
       return `
         <div class="movies-section">
-          <h3>${bucketBadge(b)} ${esc(bucketLabel(b))}</h3>
+          <h3>${bucketBadge(b)}</h3>
           ${list.length === 0 ? `<div class="notice">Nothing here yet.</div>` : list.map((r) => `
             <div class="movie-row">
               <span class="movie-row__rank">${overallRank(r, offsets)}.</span>

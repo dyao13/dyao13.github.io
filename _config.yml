@@ -12,7 +12,7 @@ title                    : "Daniel Yao"
 title_separator          : "-"
 name                     : &name "Daniel Yao"
 description              : &description "personal description"
-url                      : https://dyao13.github.io/ # the base hostname & protocol for your site e.g. "https://[your GitHub username].github.io"
+url                      : https://dyao13.github.io # the base hostname & protocol for your site e.g. "https://[your GitHub username].github.io"
 baseurl                  : "" # the subpath of your site, e.g. "/blog"
 repository               : "dyao13/dyao13.github.io"
 

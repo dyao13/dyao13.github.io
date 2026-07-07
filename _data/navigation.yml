@@ -30,6 +30,9 @@ main:
   - title: "CV"
     url: https://github.com/dyao13/CV/blob/main/yao_cv/yao_cv.pdf
     target: "_blank"
+
+  - title: "Movies"
+    url: /movies/
     
   # - title: "Guide"
   #   url: /markdown/

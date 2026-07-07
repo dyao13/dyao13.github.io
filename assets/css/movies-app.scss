@@ -1,0 +1,365 @@
+---
+---
+
+/*
+ * MovieRank app styles. Everything is scoped under .movies-app so the
+ * rest of the site is unaffected. Theme variables come from _sass so the
+ * app inherits the site's colors, radius, and spacing.
+ */
+
+@import "vendor/breakpoint/breakpoint";
+@import "variables";
+
+$movies-green: #2f9e44;
+$movies-yellow-border: #b08900;
+$movies-yellow-text: #8a6d00;
+$movies-red: #c92a2a;
+
+.movies-app {
+
+  /* ---- layout helpers ---- */
+
+  .movies-section {
+    margin-bottom: 2em;
+  }
+
+  .movies-toolbar {
+    margin-bottom: 1.5em;
+
+    .btn {
+      margin-right: 0.25em;
+    }
+  }
+
+  .movies-form {
+    max-width: 28em;
+
+    label {
+      display: block;
+      margin-top: 0.75em;
+      font-weight: bold;
+      font-size: $type-size-6;
+      font-family: $sans-serif;
+    }
+
+    input[type="text"],
+    input[type="email"],
+    input[type="password"],
+    input[type="number"],
+    input[type="date"],
+    textarea {
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    .movies-form__actions {
+      margin-top: 1em;
+    }
+  }
+
+  .movies-error {
+    margin: 1em 0;
+    padding: 0.5em 1em;
+    border-left: 0.25em solid $danger-color;
+    background-color: mix(#fff, $danger-color, 90%);
+    font-size: $type-size-6;
+  }
+
+  .movies-muted {
+    color: $gray;
+    font-size: $type-size-6;
+  }
+
+  /* ---- bucket tabs ---- */
+
+  .bucket-tabs {
+    margin-bottom: 1em;
+    border-bottom: 1px solid $border-color;
+
+    button {
+      display: inline-block;
+      margin: 0 0.25em -1px 0;
+      padding: 0.4em 0.9em;
+      border: 1px solid transparent;
+      border-bottom: none;
+      border-radius: $border-radius $border-radius 0 0;
+      background: none;
+      color: $text-color;
+      font-family: $sans-serif;
+      font-size: $type-size-6;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button[aria-selected="true"] {
+      border-color: $border-color;
+      background-color: $background-color;
+      color: $link-color;
+    }
+  }
+
+  /* ---- bucket badges and score pills ---- */
+
+  .bucket-badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.75em;
+    font-weight: bold;
+    font-family: $sans-serif;
+  }
+
+  .bucket-badge--green {
+    border: 1px solid $movies-green;
+    color: $movies-green;
+    background: transparent;
+  }
+
+  .bucket-badge--yellow {
+    border: 1px solid $movies-yellow-border;
+    color: $movies-yellow-text;
+    background: transparent;
+  }
+
+  .bucket-badge--red {
+    border: 1px solid $movies-red;
+    color: $movies-red;
+    background: transparent;
+  }
+
+  .score-pill {
+    display: inline-block;
+    min-width: 2.4em;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.25rem;
+    font-family: $monospace;
+    font-size: 0.85em;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  .score-pill--green {
+    border: 1px solid $movies-green;
+    color: $movies-green;
+  }
+
+  .score-pill--yellow {
+    border: 1px solid $movies-yellow-border;
+    color: $movies-yellow-text;
+  }
+
+  .score-pill--red {
+    border: 1px solid $movies-red;
+    color: $movies-red;
+  }
+
+  /* ---- bucket picker buttons ---- */
+
+  .bucket-picker {
+    margin: 1em 0;
+
+    button {
+      display: block;
+      width: 100%;
+      max-width: 22em;
+      margin-bottom: 0.5em;
+      padding: 0.6em 1em;
+      border: 1px solid $border-color;
+      border-left-width: 0.3em;
+      border-radius: $border-radius;
+      background-color: $background-color;
+      color: $text-color;
+      font-family: $sans-serif;
+      font-size: $type-size-5;
+      text-align: left;
+      cursor: pointer;
+
+      &:hover {
+        background-color: $lighter-gray;
+      }
+    }
+
+    .bucket-picker__green {
+      border-left-color: $movies-green;
+    }
+
+    .bucket-picker__yellow {
+      border-left-color: $movies-yellow-border;
+    }
+
+    .bucket-picker__red {
+      border-left-color: $movies-red;
+    }
+  }
+
+  /* ---- ranked list ---- */
+
+  .movie-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6em;
+    padding: 0.5em 0.25em;
+    border-bottom: 1px solid $border-color;
+
+    &:last-child {
+      border-bottom: none;
+    }
+  }
+
+  .movie-row__rank {
+    min-width: 1.8em;
+    color: $gray;
+    font-family: $monospace;
+    font-size: $type-size-6;
+    text-align: right;
+  }
+
+  .movie-row__body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .movie-row__title {
+    font-weight: bold;
+  }
+
+  .movie-row__year {
+    color: $gray;
+    font-size: $type-size-6;
+  }
+
+  .movie-row__meta {
+    margin-top: 0.1em;
+    color: $gray;
+    font-size: $type-size-6;
+  }
+
+  /* ---- pairwise comparison ---- */
+
+  .compare-cards {
+    margin: 1em 0;
+  }
+
+  .compare-card {
+    max-width: 26em;
+    margin-bottom: 0.75em;
+    padding: 0.75em 1em;
+    border: 1px solid $border-color;
+    border-radius: $border-radius;
+
+    .compare-card__title {
+      font-weight: bold;
+    }
+
+    .btn {
+      margin-top: 0.5em;
+    }
+  }
+
+  .compare-vs {
+    margin: 0.25em 0 1em;
+    color: $gray;
+    font-size: $type-size-6;
+    font-weight: bold;
+    text-transform: uppercase;
+  }
+
+  .compare-progress {
+    color: $gray;
+    font-size: $type-size-6;
+  }
+
+  /* ---- search results / person chips ---- */
+
+  .movies-search-results {
+    margin: 0.5em 0;
+    padding: 0;
+    list-style: none;
+
+    li {
+      display: flex;
+      align-items: center;
+      gap: 0.6em;
+      padding: 0.35em 0.25em;
+      border-bottom: 1px solid $border-color;
+
+      &:last-child {
+        border-bottom: none;
+      }
+    }
+  }
+
+  .person-chip {
+    display: inline-block;
+    margin: 0 0.3em 0.3em 0;
+    padding: 0.15rem 0.6rem;
+    border: 1px solid $border-color;
+    border-radius: 999px;
+    font-size: $type-size-6;
+
+    button {
+      margin-left: 0.3em;
+      padding: 0;
+      border: none;
+      background: none;
+      color: $gray;
+      font-weight: bold;
+      cursor: pointer;
+    }
+  }
+
+  .btn--small-inline {
+    margin-bottom: 0;
+    padding: 0.25em 0.75em;
+    font-size: $type-size-7;
+  }
+
+  /* ---- movie posters (TMDB) ---- */
+
+  .movie-poster {
+    display: block;
+    max-width: 140px;
+    height: auto;
+    margin: 0.5em 0 1em;
+    border: 1px solid $border-color;
+    border-radius: $border-radius;
+  }
+
+  .tmdb-thumb {
+    flex-shrink: 0;
+    width: 32px;
+    height: 48px;
+    object-fit: cover;
+    border: 1px solid $border-color;
+    border-radius: 2px;
+  }
+
+  .tmdb-thumb--empty {
+    display: inline-block;
+    background-color: $lighter-gray;
+  }
+
+  /* ---- friend list rows ---- */
+
+  .friend-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
+    padding: 0.4em 0.25em;
+    border-bottom: 1px solid $border-color;
+
+    &:last-child {
+      border-bottom: none;
+    }
+
+    .friend-row__name {
+      flex: 1;
+    }
+  }
+
+  @include breakpoint(max-width $small) {
+    .movie-row {
+      flex-wrap: wrap;
+    }
+  }
+}

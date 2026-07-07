@@ -16,6 +16,7 @@
     "Robert Zupko"
   ],
   "license": "MIT",
+  "type": "module",
   "bugs": {
     "url": "https://github.com/academicpages/academicpages.github.io/issues"
   },

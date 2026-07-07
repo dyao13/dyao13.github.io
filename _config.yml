@@ -183,6 +183,8 @@ exclude:
   - package.json*
   - Rakefile
   - README
+  - supabase
+  - tests
   - tmp
   - vendor
 keep_files:

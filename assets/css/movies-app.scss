@@ -177,8 +177,13 @@ $movies-red: #c92a2a;
   .rating-pills {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
+    /* Baseline (not center) so plain text sits level with pill text. */
+    align-items: baseline;
     gap: 0.35em;
+  }
+
+  .rating-pills__by {
+    color: $text-color;
   }
 
   .pill--compact {

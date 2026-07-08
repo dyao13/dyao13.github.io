@@ -170,8 +170,17 @@ function scorePill(score, bucket, extraClass = "") {
   return `<span class="score-pill score-pill--${esc(bucket)} ${esc(extraClass)}">${esc(formatScore(score))}</span>`;
 }
 
-function rankPill(rank, bucket, extraClass = "") {
-  return `<span class="score-pill score-pill--${esc(bucket)} ${esc(extraClass)}">#${esc(rank)}</span>`;
+function profileLink(p) {
+  if (!p) return "";
+  const name = esc(p.display_name ?? p.username ?? "Someone");
+  return p.username
+    ? `<a href="#/profile/${esc(encodeURIComponent(p.username))}">${name}</a>`
+    : name;
+}
+
+function rankPill(rank, bucket, extraClass = "", total = null) {
+  const text = total ? `#${rank} out of ${total}` : `#${rank}`;
+  return `<span class="score-pill score-pill--${esc(bucket)} ${esc(extraClass)}">${esc(text)}</span>`;
 }
 
 function movieLabel(movie) {
@@ -633,33 +642,50 @@ async function loadDashboardData() {
     if (res.error) throw res.error;
   }
 
-  // The feed is a view, so join movie titles and profile names client-side.
+  // The feed is a view, so join movie titles, profile names, and the
+  // friends' own ratings client-side.
   const feed = feedRes.data ?? [];
   let feedMovies = new Map();
   let feedProfiles = new Map();
+  let feedRatings = new Map();
+  const feedWith = new Map();
   if (feed.length > 0) {
     const movieIds = [...new Set(feed.map((f) => f.movie_id))];
     const userIds = [...new Set(feed.map((f) => f.user_id))];
-    const [moviesRes, profilesRes] = await Promise.all([
+    const [moviesRes, profilesRes, feedRatingsRes, participantsRes] = await Promise.all([
       sb.from("movies").select("id, title, release_year").eq("media_type", MEDIA.key).in("id", movieIds),
       sb.from("profiles").select("id, username, display_name").in("id", userIds),
+      sb.from("ratings")
+        .select("user_id, movie_id, bucket, score")
+        .in("movie_id", movieIds)
+        .in("user_id", userIds),
+      sb.from("watch_event_participants")
+        .select("watch_event_id, profiles(username, display_name)")
+        .in("watch_event_id", feed.map((f) => f.id)),
     ]);
     feedMovies = new Map((moviesRes.data ?? []).map((m) => [m.id, m]));
     feedProfiles = new Map((profilesRes.data ?? []).map((p) => [p.id, p]));
+    feedRatings = new Map((feedRatingsRes.data ?? []).map((r) => [`${r.user_id}:${r.movie_id}`, r]));
+    for (const p of participantsRes.data ?? []) {
+      if (!p.profiles) continue;
+      const people = feedWith.get(p.watch_event_id) ?? [];
+      people.push(p.profiles);
+      feedWith.set(p.watch_event_id, people);
+    }
   }
 
-  return { ratings: ratingsRes.data ?? [], watches: watchesRes.data ?? [], feed, feedMovies, feedProfiles };
+  return { ratings: ratingsRes.data ?? [], watches: watchesRes.data ?? [], feed, feedMovies, feedProfiles, feedRatings, feedWith };
 }
 
 function watchInfoByMovie(watches) {
   const info = new Map();
   for (const w of watches) {
-    const entry = info.get(w.movie_id) ?? { lastWatched: null, withNames: new Set() };
+    const entry = info.get(w.movie_id) ?? { lastWatched: null, with: new Map() };
     if (w.watched_on && (!entry.lastWatched || w.watched_on > entry.lastWatched)) {
       entry.lastWatched = w.watched_on;
     }
     for (const p of w.watch_event_participants ?? []) {
-      if (p.profiles) entry.withNames.add(p.profiles.display_name);
+      if (p.profiles) entry.with.set(p.profiles.username ?? p.profiles.display_name, p.profiles);
     }
     info.set(w.movie_id, entry);
   }
@@ -669,9 +695,11 @@ function watchInfoByMovie(watches) {
 function rankedRowHtml(rating, watchInfo, offsets) {
   const movie = rating.movies;
   const info = watchInfo.get(rating.movie_id);
-  const metaParts = [rating.bucket[0].toUpperCase() + rating.bucket.slice(1)];
-  if (info?.lastWatched) metaParts.push(`${cap(MEDIA.verbPast)} ${fmtDate(info.lastWatched)}`);
-  if (info && info.withNames.size > 0) metaParts.push(`With ${[...info.withNames].join(", ")}`);
+  const metaParts = [esc(rating.bucket[0].toUpperCase() + rating.bucket.slice(1))];
+  if (info?.lastWatched) metaParts.push(esc(`${cap(MEDIA.verbPast)} ${fmtDate(info.lastWatched)}`));
+  if (info && info.with.size > 0) {
+    metaParts.push(`With ${[...info.with.values()].map(profileLink).join(", ")}`);
+  }
 
   return `
     <div class="movie-row movie-row--${esc(rating.bucket)}">
@@ -680,7 +708,7 @@ function rankedRowHtml(rating, watchInfo, offsets) {
       <div class="movie-row__body">
         <a class="movie-row__title" href="#/movie/${esc(rating.movie_id)}">${esc(movie?.title ?? "Unknown")}</a>
         ${movie?.release_year ? `<span class="movie-row__year">(${esc(movie.release_year)})</span>` : ""}
-        <div class="movie-row__meta">${esc(metaParts.join(" · "))}</div>
+        <div class="movie-row__meta">${metaParts.join(" · ")}</div>
       </div>
     </div>
   `;
@@ -721,6 +749,7 @@ async function renderDashboard() {
   state.dashboardData = data;
 
   const recentWatches = data.watches.slice(0, 8);
+  const myRatingsByMovie = new Map(data.ratings.map((r) => [r.movie_id, r]));
 
   setView(`
     ${toolbarHtml()}
@@ -738,21 +767,24 @@ async function renderDashboard() {
     </div>
 
     <div class="movies-section">
-      <h2>Recently ${esc(MEDIA.verbPast)}</h2>
+      <h2>My activity</h2>
       ${recentWatches.length === 0
         ? `<div class="notice">No ${esc(MEDIA.eventPlural)} logged yet.</div>`
         : recentWatches.map((w) => {
-            const withNames = (w.watch_event_participants ?? [])
-              .map((p) => p.profiles?.display_name)
+            const withProfiles = (w.watch_event_participants ?? [])
+              .map((p) => p.profiles)
               .filter(Boolean);
-            const meta = [w.watched_on ? fmtDate(w.watched_on) : "date unknown"];
-            if (withNames.length > 0) meta.push(`With ${withNames.join(", ")}`);
+            const rating = myRatingsByMovie.get(w.movie_id);
             return `
               <div class="movie-row">
                 <div class="movie-row__body">
+                  ${profileLink(state.profile) || "I"}
+                  ${esc(MEDIA.verbPast)}
                   <a class="movie-row__title" href="#/movie/${esc(w.movie_id)}">${esc(w.movies?.title ?? "Unknown")}</a>
                   ${w.movies?.release_year ? `<span class="movie-row__year">(${esc(w.movies.release_year)})</span>` : ""}
-                  <div class="movie-row__meta">${esc(meta.join(" · "))}</div>
+                  ${withProfiles.length > 0 ? `with ${withProfiles.map(profileLink).join(", ")}` : ""}
+                  ${rating ? `and rated it ${scorePill(rating.score, rating.bucket, "pill--compact")}` : ""}
+                  <div class="movie-row__meta">${esc(w.watched_on ? fmtDate(w.watched_on) : "date unknown")}</div>
                 </div>
               </div>
             `;
@@ -766,13 +798,17 @@ async function renderDashboard() {
         : data.feed.map((f) => {
             const movie = data.feedMovies.get(f.movie_id);
             const person = data.feedProfiles.get(f.user_id);
+            const rating = data.feedRatings.get(`${f.user_id}:${f.movie_id}`);
+            const withPeople = data.feedWith.get(f.id) ?? [];
             return `
               <div class="movie-row">
                 <div class="movie-row__body">
-                  <a href="#/profile/${esc(encodeURIComponent(person?.username ?? ""))}">${esc(person?.display_name ?? "Someone")}</a>
+                  ${profileLink(person) || "Someone"}
                   ${esc(MEDIA.verbPast)}
                   <a class="movie-row__title" href="#/movie/${esc(f.movie_id)}">${esc(movie?.title ?? `a ${MEDIA.noun}`)}</a>
                   ${movie?.release_year ? `<span class="movie-row__year">(${esc(movie.release_year)})</span>` : ""}
+                  ${withPeople.length > 0 ? `with ${withPeople.map(profileLink).join(", ")}` : ""}
+                  ${rating ? `and rated it ${scorePill(rating.score, rating.bucket, "pill--compact")}` : ""}
                   <div class="movie-row__meta">${esc(f.watched_on ? fmtDate(f.watched_on) : fmtDate(f.created_at?.slice(0, 10)))}</div>
                 </div>
               </div>
@@ -1380,6 +1416,7 @@ async function finalizeRanking(insertionIndex) {
 
   flow.result = data;
   flow.overallRank = overallRank(data, bucketOffsets(allMine ?? []));
+  flow.totalRanked = (allMine ?? []).length;
   flow.step = "done";
   renderRankFlow();
 }
@@ -1392,7 +1429,7 @@ function renderRankDone() {
     <h2>Ranked!</h2>
     <div class="notice">
       <strong>${esc(movieLabel(flow.movie))}</strong> is now
-      ${bucketBadge(r.bucket)} ${scorePill(r.score, r.bucket)} ${rankPill(flow.overallRank, r.bucket)}
+      ${bucketBadge(r.bucket)} ${scorePill(r.score, r.bucket)} ${rankPill(flow.overallRank, r.bucket, "pill--compact", flow.totalRanked)}
     </div>
     <p>
       <a class="btn" href="#/">Back to my ${esc(MEDIA.plural)}</a>
@@ -1451,11 +1488,32 @@ async function renderMovieDetail(movieId) {
   otherRatings = (otherRatings ?? []).sort((a, b) => b.score - a.score);
 
   let otherProfiles = new Map();
+  const otherLists = new Map();
   if (otherRatings.length > 0) {
-    const { data } = await sb.from("profiles")
-      .select("id, username, display_name")
-      .in("id", otherRatings.map((r) => r.user_id));
-    otherProfiles = new Map((data ?? []).map((p) => [p.id, p]));
+    const ids = otherRatings.map((r) => r.user_id);
+    // Each rater's full list for this medium, to show their "#rank/total".
+    // Needs migration 007 (rank_position on the view); degrades to no rank
+    // pill via the base table (friends only) if it has not been run.
+    const [profilesRes, listsRes] = await Promise.all([
+      sb.from("profiles").select("id, username, display_name").in("id", ids),
+      sb.from("movie_ratings_visible")
+        .select("user_id, movie_id, bucket, rank_position")
+        .in("user_id", ids)
+        .eq("media_type", MEDIA.key),
+    ]);
+    otherProfiles = new Map((profilesRes.data ?? []).map((p) => [p.id, p]));
+    let listRows = listsRes.data;
+    if (listsRes.error) {
+      ({ data: listRows } = await sb.from("ratings")
+        .select("user_id, movie_id, bucket, rank_position")
+        .in("user_id", ids)
+        .eq("media_type", MEDIA.key));
+    }
+    for (const row of listRows ?? []) {
+      const list = otherLists.get(row.user_id) ?? [];
+      list.push(row);
+      otherLists.set(row.user_id, list);
+    }
   }
 
   const allScores = [...otherRatings.map((r) => Number(r.score)), ...(myRating ? [Number(myRating.score)] : [])];
@@ -1473,12 +1531,12 @@ async function renderMovieDetail(movieId) {
     <div class="movies-section">
       <h3>My rating</h3>
       ${myRating
-        ? `<p class="rating-pills">${bucketBadge(myRating.bucket, "pill--compact")} ${scorePill(myRating.score, myRating.bucket, "pill--compact")} ${rankPill(myOverallRank, myRating.bucket, "pill--compact")}</p>`
+        ? `<p class="rating-pills">${bucketBadge(myRating.bucket, "pill--compact")} ${scorePill(myRating.score, myRating.bucket, "pill--compact")} ${rankPill(myOverallRank, myRating.bucket, "pill--compact", (allMineRes.data ?? []).length)}</p>`
         : `<div class="notice">You have not rated this ${esc(MEDIA.noun)} yet.</div>`}
       <p>
         <button type="button" class="btn" id="rate-btn">${myRating ? "Re-rank" : `Rate this ${esc(MEDIA.noun)}`}</button>
         <button type="button" class="btn btn--inverse" id="log-watch-btn">Log another ${esc(MEDIA.verb)}</button>
-        ${myRating ? `<button type="button" class="btn btn--inverse" id="delete-rating-btn">Remove rating</button>` : ""}
+        <button type="button" class="btn btn--inverse" id="delete-movie-btn">Delete</button>
       </p>
       <div id="log-watch-area"></div>
     </div>
@@ -1488,14 +1546,14 @@ async function renderMovieDetail(movieId) {
       ${watches.length === 0
         ? `<div class="notice">No ${esc(MEDIA.eventPlural)} logged for this ${esc(MEDIA.noun)}.</div>`
         : watches.map((w) => {
-            const withNames = (w.watch_event_participants ?? [])
-              .map((p) => p.profiles?.display_name).filter(Boolean);
-            const meta = [w.watched_on ? fmtDate(w.watched_on) : "date unknown"];
-            if (withNames.length > 0) meta.push(`With ${withNames.join(", ")}`);
+            const withProfiles = (w.watch_event_participants ?? [])
+              .map((p) => p.profiles).filter(Boolean);
+            const meta = [esc(w.watched_on ? fmtDate(w.watched_on) : "date unknown")];
+            if (withProfiles.length > 0) meta.push(`With ${withProfiles.map(profileLink).join(", ")}`);
             return `
               <div class="movie-row">
                 <div class="movie-row__body">
-                  ${esc(meta.join(" · "))}
+                  ${meta.join(" · ")}
                   ${w.notes ? `<div class="movie-row__meta">${esc(w.notes)}</div>` : ""}
                 </div>
               </div>
@@ -1512,12 +1570,19 @@ async function renderMovieDetail(movieId) {
         ? `<div class="notice">No one else has rated this ${esc(MEDIA.noun)} yet.</div>`
         : otherRatings.map((r) => {
             const p = otherProfiles.get(r.user_id);
+            const list = otherLists.get(r.user_id) ?? [];
+            const entry = list.find((x) => x.movie_id === movieId);
+            const rank = entry ? overallRank(entry, bucketOffsets(list)) : null;
             return `
               <div class="movie-row">
-                ${scorePill(r.score, r.bucket)}
                 <div class="movie-row__body">
-                  <a href="#/profile/${esc(encodeURIComponent(p?.username ?? ""))}">${esc(p?.display_name ?? "Member")}</a>
-                  ${bucketBadge(r.bucket)}
+                  <p class="rating-pills">
+                    ${bucketBadge(r.bucket, "pill--compact")}
+                    ${scorePill(r.score, r.bucket, "pill--compact")}
+                    ${rank !== null ? rankPill(rank, r.bucket, "pill--compact", list.length) : ""}
+                    <span class="rating-pills__by">by</span>
+                    ${profileLink(p) || "Member"}
+                  </p>
                 </div>
               </div>
             `;
@@ -1545,14 +1610,28 @@ async function renderMovieDetail(movieId) {
     startRanking({ id: movie.id, title: movie.title, release_year: movie.release_year });
   });
 
-  root.querySelector("#delete-rating-btn")?.addEventListener("click", async () => {
-    if (!confirm(`Remove your rating for "${movie.title}"? Your ${MEDIA.verb} history is kept.`)) return;
-    const { error } = await sb.rpc("remove_rating", { p_movie_id: movie.id });
-    if (error) {
-      showErrorIn(root, error.message);
+  root.querySelector("#delete-movie-btn").addEventListener("click", async () => {
+    const ok = confirm(
+      `Delete "${movie.title}" from your account? This removes your rating and all ` +
+      `${MEDIA.verb} history for it. Other members' ratings are not affected.`
+    );
+    if (!ok) return;
+    // Participants cascade with each watch event; the rating removal also
+    // renormalizes the bucket so remaining scores stay evenly spaced.
+    const { error: watchErr } = await sb.from("watch_events")
+      .delete()
+      .eq("user_id", uid())
+      .eq("movie_id", movie.id);
+    if (watchErr) {
+      showErrorIn(root, watchErr.message);
       return;
     }
-    renderMovieDetail(movieId);
+    const { error: ratingErr } = await sb.rpc("remove_rating", { p_movie_id: movie.id });
+    if (ratingErr) {
+      showErrorIn(root, ratingErr.message);
+      return;
+    }
+    location.hash = "#/";
   });
 
   root.querySelector("#log-watch-btn").addEventListener("click", () => {
@@ -1792,21 +1871,39 @@ async function renderProfilePage(username) {
 
   const isFriend = friendship?.status === "accepted";
 
+  // Public profiles (is_public = true in the database) are visible to any
+  // member, friend or not, through the same view that powers the
+  // logged-out home page.
+  let profileRatings = ratings ?? [];
+  let isPublic = false;
+  if (!isFriend && profileRatings.length === 0) {
+    const { data: pub } = await sb.from("public_rankings")
+      .select("movie_id, bucket, rank_position, score, title, release_year")
+      .eq("username", person.username)
+      .eq("media_type", MEDIA.key)
+      .order("rank_position");
+    if ((pub ?? []).length > 0) {
+      isPublic = true;
+      profileRatings = pub.map((r) => ({ ...r, movies: { title: r.title, release_year: r.release_year } }));
+    }
+  }
+  const showRankings = isFriend || isPublic;
+
   setView(`
     ${toolbarHtml()}
     <h2>${esc(person.display_name)} <span class="movies-muted">@${esc(person.username)}</span></h2>
 
-    ${!isFriend ? `
+    ${!showRankings ? `
       <div class="notice">
         You can only see rankings of accepted friends.
         ${friendship?.status === "pending" ? "A friend request is pending." : ""}
       </div>
-      ${!friendship ? `<p><button type="button" class="btn" id="add-friend-btn">Add friend</button></p>` : ""}
     ` : ""}
+    ${!isFriend && !friendship ? `<p><button type="button" class="btn" id="add-friend-btn">Add friend</button></p>` : ""}
 
-    ${isFriend ? BUCKETS.map((b) => {
-      const offsets = bucketOffsets(ratings ?? []);
-      const list = (ratings ?? []).filter((r) => r.bucket === b).sort((x, y) => x.rank_position - y.rank_position);
+    ${showRankings ? BUCKETS.map((b) => {
+      const offsets = bucketOffsets(profileRatings);
+      const list = profileRatings.filter((r) => r.bucket === b).sort((x, y) => x.rank_position - y.rank_position);
       return `
         <div class="movies-section">
           <h3>${bucketBadge(b)}</h3>

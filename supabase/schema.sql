@@ -345,7 +345,7 @@ grant select on public.watch_events_feed to authenticated;
 -- ---------------------------------------------------------------------------
 
 create or replace view public.movie_ratings_visible as
-select r.movie_id, r.user_id, r.bucket, r.score, r.updated_at
+select r.movie_id, r.user_id, r.bucket, r.rank_position, r.score, r.media_type, r.updated_at
 from public.ratings r
 join public.profiles p on p.id = r.user_id
 where public.has_profile()

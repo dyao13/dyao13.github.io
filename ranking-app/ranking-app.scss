@@ -371,6 +371,15 @@ $ranking-red: #c92a2a;
         vertical-align: middle;
       }
 
+      /* Person rows (name + @username + button): center the mixed-size
+         texts on one midline instead of a shared baseline. */
+      &.person-row > span:first-child {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35em;
+        min-width: 0;
+      }
+
       &:last-child {
         border-bottom: none;
       }

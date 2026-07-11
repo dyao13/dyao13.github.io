@@ -1231,7 +1231,7 @@ function bindWithSearch(flow) {
   const showPeople = (people) => {
     const visible = (people ?? []).filter((p) => !flow.withUsers.some((u) => u.id === p.id));
     results.innerHTML = visible.map((p) => `
-      <li>
+      <li class="person-row">
         <span>${esc(p.display_name)} <span class="ranking-muted">@${esc(p.username)}</span></span>
         <button type="button" class="btn btn--inverse btn--small-inline" data-add-user="${esc(p.id)}">Add</button>
       </li>
@@ -2013,7 +2013,7 @@ async function renderFriends() {
         .limit(8);
       const related = new Set(friendships.flatMap((f) => [f.requester_id, f.addressee_id]));
       searchResults.innerHTML = (data ?? []).map((p) => `
-        <li>
+        <li class="person-row">
           <span>
             <a href="#/profile/${esc(encodeURIComponent(p.username))}">${esc(p.display_name)}</a>
             <span class="ranking-muted">@${esc(p.username)}</span>

@@ -1,6 +1,6 @@
 /*
- * Tests for the MovieRank ranking/scoring logic (spec sections 19-20).
- * Run with:  node tests/movies-ranking.test.mjs
+ * Tests for the ranking/scoring logic (spec sections 19-20).
+ * Run with:  node ranking-app/tests/ranking-logic.test.mjs
  */
 
 import assert from "node:assert/strict";
@@ -15,7 +15,7 @@ import {
   insertAt,
   bucketOffsets,
   overallRank,
-} from "../assets/js/movies-ranking.js";
+} from "../ranking-logic.js";
 
 let passed = 0;
 
@@ -60,11 +60,11 @@ test("green bucket with 4 movies", () => {
 });
 
 test("yellow bucket with 1 movie", () => {
-  assert.deepEqual(bucketScores(1, "yellow"), ["6.7"]);
+  assert.deepEqual(bucketScores(1, "yellow"), ["6.6"]);
 });
 
 test("yellow bucket with 3 movies", () => {
-  assert.deepEqual(bucketScores(3, "yellow"), ["6.7", "5.1", "3.4"]);
+  assert.deepEqual(bucketScores(3, "yellow"), ["6.6", "5.0", "3.4"]);
 });
 
 test("red bucket with 1 movie", () => {
@@ -199,7 +199,7 @@ test("recomputing after deletion re-spaces the remaining movies", () => {
 test("moving a movie between buckets rescores both buckets", () => {
   // green 4 -> 3 after the move; yellow 2 -> 3 after the move.
   assert.deepEqual(bucketScores(3, "green"), ["10.0", "8.4", "6.7"]);
-  assert.deepEqual(bucketScores(3, "yellow"), ["6.7", "5.1", "3.4"]);
+  assert.deepEqual(bucketScores(3, "yellow"), ["6.6", "5.0", "3.4"]);
 });
 
 /* ---- Unified numbering across colors ---- */

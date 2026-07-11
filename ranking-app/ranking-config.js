@@ -1,5 +1,5 @@
 /*
- * Supabase project settings for the MovieRank app.
+ * Supabase project settings for the ranking app.
  *
  * Fill these in from your Supabase dashboard: Project Settings -> API.
  * The URL and the anon (public) key are safe to publish ONLY because the

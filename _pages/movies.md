@@ -6,4 +6,4 @@ author_profile: false
 share: false
 ---
 
-{% include movies-app.html %}
+{% include ranking-app.html %}

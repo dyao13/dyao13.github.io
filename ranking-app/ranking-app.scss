@@ -2,7 +2,7 @@
 ---
 
 /*
- * MovieRank app styles. Everything is scoped under .movies-app so the
+ * Ranking app styles. Everything is scoped under .ranking-app so the
  * rest of the site is unaffected. Theme variables come from _sass so the
  * app inherits the site's colors, radius, and spacing.
  */
@@ -10,12 +10,12 @@
 @import "vendor/breakpoint/breakpoint";
 @import "variables";
 
-$movies-green: #2f9e44;
-$movies-yellow-border: #b08900;
-$movies-yellow-text: #8a6d00;
-$movies-red: #c92a2a;
+$ranking-green: #2f9e44;
+$ranking-yellow-border: #b08900;
+$ranking-yellow-text: #8a6d00;
+$ranking-red: #c92a2a;
 
-.movies-app {
+.ranking-app {
 
   /* ---- layout helpers ---- */
 
@@ -26,15 +26,15 @@ $movies-red: #c92a2a;
     text-decoration: none;
   }
 
-  .movies-section {
+  .ranking-section {
     margin-bottom: 2em;
   }
 
-  .movies-tagline {
+  .ranking-tagline {
     margin-bottom: 0.5em;
   }
 
-  .movies-toolbar {
+  .ranking-toolbar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -46,7 +46,7 @@ $movies-red: #c92a2a;
     }
   }
 
-  .movies-form {
+  .ranking-form {
     max-width: 28em;
 
     label {
@@ -67,12 +67,56 @@ $movies-red: #c92a2a;
       box-sizing: border-box;
     }
 
-    .movies-form__actions {
+    /* A text-box look-alike that holds selected-person chips inline with
+       the search input (mirrors the theme's input styling in _forms.scss). */
+    .chip-input {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.25em;
+      width: 100%;
+      box-sizing: border-box;
+      padding: 0.25em;
+      margin-bottom: 0.5em;
+      background-color: #fff;
+      border: 1px solid mix(#fff, #000, 80%);
+      border-radius: $border-radius;
+      box-shadow: $box-shadow;
+      cursor: text;
+
+      &:hover,
+      &:focus-within {
+        border-color: mix(#fff, $primary-color, 50%);
+      }
+
+      #with-chips {
+        display: contents;
+      }
+
+      .person-chip {
+        margin: 0;
+      }
+
+      input[type="text"],
+      input[type="text"]:hover,
+      input[type="text"]:focus {
+        flex: 1 1 8em;
+        width: auto;
+        min-width: 8em;
+        margin: 0;
+        padding: 0 0.15em;
+        border: none;
+        box-shadow: none;
+        outline: none;
+      }
+    }
+
+    .ranking-form__actions {
       margin-top: 1em;
     }
   }
 
-  .movies-error {
+  .ranking-error {
     margin: 1em 0;
     padding: 0.5em 1em;
     border-left: 0.25em solid $danger-color;
@@ -80,7 +124,7 @@ $movies-red: #c92a2a;
     font-size: $type-size-6;
   }
 
-  .movies-muted {
+  .ranking-muted {
     color: $gray;
     font-size: $type-size-6;
   }
@@ -129,20 +173,20 @@ $movies-red: #c92a2a;
   }
 
   .bucket-badge--green {
-    border: 1px solid $movies-green;
-    color: $movies-green;
+    border: 1px solid $ranking-green;
+    color: $ranking-green;
     background: transparent;
   }
 
   .bucket-badge--yellow {
-    border: 1px solid $movies-yellow-border;
-    color: $movies-yellow-text;
+    border: 1px solid $ranking-yellow-border;
+    color: $ranking-yellow-text;
     background: transparent;
   }
 
   .bucket-badge--red {
-    border: 1px solid $movies-red;
-    color: $movies-red;
+    border: 1px solid $ranking-red;
+    color: $ranking-red;
     background: transparent;
   }
 
@@ -160,18 +204,18 @@ $movies-red: #c92a2a;
   }
 
   .score-pill--green {
-    border: 1px solid $movies-green;
-    color: $movies-green;
+    border: 1px solid $ranking-green;
+    color: $ranking-green;
   }
 
   .score-pill--yellow {
-    border: 1px solid $movies-yellow-border;
-    color: $movies-yellow-text;
+    border: 1px solid $ranking-yellow-border;
+    color: $ranking-yellow-text;
   }
 
   .score-pill--red {
-    border: 1px solid $movies-red;
-    color: $movies-red;
+    border: 1px solid $ranking-red;
+    color: $ranking-red;
   }
 
   .rating-pills {
@@ -218,15 +262,15 @@ $movies-red: #c92a2a;
     }
 
     .bucket-picker__green {
-      border-left-color: $movies-green;
+      border-left-color: $ranking-green;
     }
 
     .bucket-picker__yellow {
-      border-left-color: $movies-yellow-border;
+      border-left-color: $ranking-yellow-border;
     }
 
     .bucket-picker__red {
-      border-left-color: $movies-red;
+      border-left-color: $ranking-red;
     }
   }
 
@@ -309,7 +353,7 @@ $movies-red: #c92a2a;
 
   /* ---- search results / person chips ---- */
 
-  .movies-search-results {
+  .ranking-search-results {
     margin: 0.5em 0;
     padding: 0;
     list-style: none;
@@ -320,6 +364,12 @@ $movies-red: #c92a2a;
       gap: 0.6em;
       padding: 0.35em 0.25em;
       border-bottom: 1px solid $border-color;
+
+      /* Smaller inline text (@username, external ratings) sits on the same
+         baseline as the name, which reads as bottom-aligned; center it. */
+      .ranking-muted {
+        vertical-align: middle;
+      }
 
       &:last-child {
         border-bottom: none;

@@ -1,7 +1,7 @@
 /*
- * Pure ranking + scoring logic for the MovieRank app.
+ * Pure ranking + scoring logic for the ranking app.
  * No DOM or Supabase dependencies so it can be unit-tested with Node
- * (see tests/movies-ranking.test.mjs).
+ * (see ranking-app/tests/ranking-logic.test.mjs).
  */
 
 export const BUCKETS = ["green", "yellow", "red"];

@@ -183,8 +183,9 @@ exclude:
   - package.json*
   - Rakefile
   - README
-  - supabase
-  - tests
+  - ranking-app/README.md
+  - ranking-app/supabase
+  - ranking-app/tests
   - tmp
   - vendor
 keep_files:

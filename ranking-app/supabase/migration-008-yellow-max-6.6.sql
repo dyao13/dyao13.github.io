@@ -2,7 +2,7 @@
 -- no longer overlaps the green bucket's min (6.7).
 --
 -- Run once in the Supabase SQL editor after deploying the matching change to
--- assets/js/movies-ranking.js (getBucketRange) and supabase/schema.sql
+-- ranking-app/ranking-logic.js (getBucketRange) and supabase/schema.sql
 -- (public.score_for_position).
 
 create or replace function public.score_for_position(p_index integer, p_total integer, p_bucket text)

@@ -1,8 +1,8 @@
 -- ===========================================================================
--- MovieRank schema for Supabase.
+-- Ranking app schema for Supabase.
 -- Run this whole file once in the Supabase SQL editor (Dashboard -> SQL).
 -- It creates the tables, Row Level Security policies, and RPC functions the
--- frontend (assets/js/movies-app.js) calls.
+-- frontend (ranking-app/ranking-app.js) calls.
 -- ===========================================================================
 
 create schema if not exists extensions;
@@ -286,6 +286,7 @@ create policy "wep_select_visible" on public.watch_event_participants
   for select to authenticated
   using (public.can_view_watch_event(watch_event_id));
 
+-- Participants must be accepted friends of the event owner.
 create policy "wep_insert_own_event" on public.watch_event_participants
   for insert to authenticated
   with check (
@@ -293,6 +294,7 @@ create policy "wep_insert_own_event" on public.watch_event_participants
       select 1 from public.watch_events we
       where we.id = watch_event_id and we.user_id = auth.uid()
     )
+    and public.is_friends_with(participant_user_id)
   );
 
 create policy "wep_delete_own_event" on public.watch_event_participants
@@ -393,7 +395,7 @@ grant select on public.public_rankings to anon, authenticated;
 -- Scoring + ranking functions
 -- ---------------------------------------------------------------------------
 
--- Mirrors scoreForPosition() in assets/js/movies-ranking.js.
+-- Mirrors scoreForPosition() in ranking-app/ranking-logic.js.
 create or replace function public.score_for_position(p_index integer, p_total integer, p_bucket text)
 returns numeric
 language plpgsql immutable

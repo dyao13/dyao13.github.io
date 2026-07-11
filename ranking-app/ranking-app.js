@@ -1,9 +1,9 @@
 /*
- * MovieRank — a private movie-ranking app mounted inside the Jekyll site.
+ * Ranking app — a private movie/book/show-ranking app mounted inside the Jekyll site.
  *
  * Jekyll only serves this file; all dynamic behavior (auth, data, privacy)
  * is handled by Supabase. See supabase/schema.sql for the backend and
- * assets/js/movies-ranking.js for the pure ranking/scoring logic.
+ * ranking-app/ranking-logic.js for the pure ranking/scoring logic.
  *
  * Routing is hash-based so it works on a static host:
  *   #/            dashboard
@@ -15,7 +15,7 @@
  */
 
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
-import { SUPABASE_URL, SUPABASE_ANON_KEY, TMDB_API_KEY, OMDB_API_KEY, PUBLIC_PROFILE_USERNAME } from "./movies-config.js";
+import { SUPABASE_URL, SUPABASE_ANON_KEY, TMDB_API_KEY, OMDB_API_KEY, PUBLIC_PROFILE_USERNAME } from "./ranking-config.js";
 import {
   BUCKETS,
   bucketLabel,
@@ -27,9 +27,9 @@ import {
   insertAt,
   bucketOffsets,
   overallRank,
-} from "./movies-ranking.js";
+} from "./ranking-logic.js";
 
-const root = document.getElementById("movies-app");
+const root = document.getElementById("ranking-app");
 
 /*
  * The same app powers /movies/, /books/, and /shows/. Each Jekyll page sets
@@ -152,12 +152,12 @@ function loadingView(message = "Loading…") {
 }
 
 function errorHtml(message) {
-  return `<div class="movies-error">${esc(message)}</div>`;
+  return `<div class="ranking-error">${esc(message)}</div>`;
 }
 
 function showErrorIn(container, message) {
   const box = document.createElement("div");
-  box.className = "movies-error";
+  box.className = "ranking-error";
   box.textContent = message;
   container.prepend(box);
 }
@@ -189,7 +189,7 @@ function movieLabel(movie) {
 }
 
 /* ------------------------------------------------------------------ */
-/* TMDB movie lookup (optional — needs TMDB_API_KEY in movies-config)  */
+/* TMDB movie lookup (optional — needs TMDB_API_KEY in ranking-config)  */
 /* ------------------------------------------------------------------ */
 
 function tmdbConfigured() {
@@ -480,8 +480,8 @@ async function renderPublicDashboard() {
     .order("rank_position");
 
   const showLoginButton = `
-    <p class="movies-tagline">A ranking app for friends &middot; Log in to rank your own</p>
-    <div class="movies-toolbar">
+    <p class="ranking-tagline">A ranking app for friends &middot; Log in to rank your own</p>
+    <div class="ranking-toolbar">
       <button type="button" class="btn" id="show-login">Log in</button>
       <button type="button" class="btn btn--inverse" id="show-signup">Sign up</button>
     </div>
@@ -509,7 +509,7 @@ async function renderPublicDashboard() {
     ${BUCKETS.map((b) => {
       const list = data.filter((r) => r.bucket === b).sort((x, y) => x.rank_position - y.rank_position);
       return `
-        <div class="movies-section">
+        <div class="ranking-section">
           <h3>${bucketBadge(b)}</h3>
           ${list.length === 0 ? `<div class="notice">Nothing here yet.</div>` : list.map((r) => `
             <div class="movie-row movie-row--${esc(r.bucket)}">
@@ -524,7 +524,7 @@ async function renderPublicDashboard() {
         </div>
       `;
     }).join("")}
-    <p class="movies-muted">A ranking app for friends &middot; Log in to rank your own</p>
+    <p class="ranking-muted">A ranking app for friends &middot; Log in to rank your own</p>
   `);
   bindShowLogin();
 }
@@ -549,15 +549,15 @@ function bindShowLogin() {
 function renderAuth() {
   const isSignup = state.authMode === "signup";
   setView(`
-    <p class="movies-tagline">A ranking app for friends</p>
-    <div class="movies-form">
+    <p class="ranking-tagline">A ranking app for friends</p>
+    <div class="ranking-form">
       <form id="auth-form">
         <label for="auth-email">Email</label>
         <input type="email" id="auth-email" required autocomplete="email">
         <label for="auth-password">Password</label>
         <input type="password" id="auth-password" required minlength="8"
                autocomplete="${isSignup ? "new-password" : "current-password"}">
-        <div class="movies-form__actions">
+        <div class="ranking-form__actions">
           <button type="submit" class="btn">${isSignup ? "Sign up" : "Log in"}</button>
           <button type="button" class="btn btn--inverse" id="auth-toggle">
             ${isSignup ? "I already have an account" : "Create an account"}
@@ -565,7 +565,7 @@ function renderAuth() {
           ${publicProfileConfigured() ? `<button type="button" class="btn btn--inverse" id="auth-back">Back to rankings</button>` : ""}
         </div>
       </form>
-      ${isSignup ? `<p class="movies-muted">You will need an invite code from an existing member to finish setting up your account.</p>` : ""}
+      ${isSignup ? `<p class="ranking-muted">You will need an invite code from an existing member to finish setting up your account.</p>` : ""}
     </div>
   `);
 
@@ -614,7 +614,7 @@ function renderAuth() {
 function renderProfileSetup() {
   setView(`
     <p>Welcome! One last step: enter your invite code and pick a username.</p>
-    <div class="movies-form">
+    <div class="ranking-form">
       <form id="setup-form">
         <label for="setup-code">Invite code</label>
         <input type="text" id="setup-code" required autocomplete="off">
@@ -623,7 +623,7 @@ function renderProfileSetup() {
                title="3-20 characters: letters, numbers, or underscore">
         <label for="setup-display">Display name</label>
         <input type="text" id="setup-display" required maxlength="60">
-        <div class="movies-form__actions">
+        <div class="ranking-form__actions">
           <button type="submit" class="btn">Create profile</button>
           <button type="button" class="btn btn--inverse" id="setup-logout">Log out</button>
         </div>
@@ -659,13 +659,13 @@ function renderProfileSetup() {
 
 function toolbarHtml() {
   return `
-    <p class="movies-tagline">A ranking app for friends</p>
-    <div class="movies-toolbar">
+    <p class="ranking-tagline">A ranking app for friends</p>
+    <div class="ranking-toolbar">
       <a class="btn" href="#/add">Add ${esc(MEDIA.noun)}</a>
       <a class="btn btn--inverse" href="#/">My ${esc(MEDIA.plural)}</a>
       <a class="btn btn--inverse" href="#/friends">My friends</a>
       <button class="btn btn--inverse" id="logout-btn" type="button">Log out</button>
-      <span class="movies-muted">Signed in as ${esc(state.profile.display_name)} (@${esc(state.profile.username)})</span>
+      <span class="ranking-muted">Signed in as ${esc(state.profile.display_name)} (@${esc(state.profile.username)})</span>
     </div>
   `;
 }
@@ -816,7 +816,7 @@ async function renderDashboard() {
   setView(`
     ${toolbarHtml()}
 
-    <div class="movies-section">
+    <div class="ranking-section">
       <h2>My ${esc(MEDIA.plural)}</h2>
       <div class="bucket-tabs" role="tablist">
         ${["all", ...BUCKETS].map((tab) => `
@@ -828,7 +828,7 @@ async function renderDashboard() {
       <div id="ranked-lists">${dashboardListHtml(data)}</div>
     </div>
 
-    <div class="movies-section">
+    <div class="ranking-section">
       <h2>My activity</h2>
       ${recentWatches.length === 0
         ? `<div class="notice">No ${esc(MEDIA.eventPlural)} logged yet.</div>`
@@ -853,7 +853,7 @@ async function renderDashboard() {
           }).join("")}
     </div>
 
-    <div class="movies-section">
+    <div class="ranking-section">
       <h2>Friend's activity</h2>
       ${data.feed.length === 0
         ? `<div class="notice">No friend activity yet. Add friends on the <a href="#/friends">Friends</a> page.</div>`
@@ -878,7 +878,7 @@ async function renderDashboard() {
           }).join("")}
     </div>
 
-    <p class="movies-muted">A ranking app for friends</p>
+    <p class="ranking-muted">A ranking app for friends</p>
   `);
 
   bindToolbar();
@@ -905,7 +905,7 @@ function newAddFlow() {
     year: "",
     matches: null,
     selectedMovie: null, // { id | null, tmdb_id?, title, release_year, poster_url?, director? }
-    watchedOn: todayStr(),
+    watchedOn: "", // yyyy-mm-dd, or "" to leave the watch undated
     withUsers: [], // [{ id, username, display_name }]
     notes: "",
   };
@@ -930,13 +930,13 @@ function renderAddStepMovie() {
   setView(`
     ${toolbarHtml()}
     <h2>Add a ${esc(MEDIA.noun)}</h2>
-    <div class="movies-form">
+    <div class="ranking-form">
       <form id="movie-form">
         <label for="movie-title">Title</label>
         <input type="text" id="movie-title" required value="${esc(flow.title)}">
         <label for="movie-year">${esc(MEDIA.yearLabel)}</label>
         <input type="number" id="movie-year" min="1000" max="2100" value="${esc(flow.year)}">
-        <div class="movies-form__actions">
+        <div class="ranking-form__actions">
           <button type="submit" class="btn">Continue</button>
           ${searchConfigured() ? `<button type="button" class="btn btn--inverse" id="switch-to-search">Search instead</button>` : ""}
           <a class="btn btn--inverse" href="#/">Cancel</a>
@@ -992,16 +992,16 @@ function renderAddStepSearch() {
   setView(`
     ${toolbarHtml()}
     <h2>Add a ${esc(MEDIA.noun)}</h2>
-    <div class="movies-form">
+    <div class="ranking-form">
       <label for="tmdb-search">Search for a ${esc(MEDIA.noun)}</label>
       <input type="text" id="tmdb-search" placeholder="${esc(MEDIA.searchPlaceholder)}" autocomplete="off" value="${esc(flow.searchQuery)}">
-      <ul class="movies-search-results" id="tmdb-results"></ul>
-      <p class="movies-muted">
+      <ul class="ranking-search-results" id="tmdb-results"></ul>
+      <p class="ranking-muted">
         Can't find it?
         <button type="button" class="btn btn--inverse btn--small-inline" id="switch-to-manual">Add it manually</button>
       </p>
       <p><a class="btn btn--inverse" href="#/">Cancel</a></p>
-      <p class="movies-muted">${MEDIA.searchAttribution}</p>
+      <p class="ranking-muted">${MEDIA.searchAttribution}</p>
     </div>
   `);
   bindToolbar();
@@ -1016,17 +1016,17 @@ function renderAddStepSearch() {
 
   const renderResults = (movies) => {
     results.innerHTML = movies.length === 0
-      ? `<li><span class="movies-muted">No results.</span></li>`
+      ? `<li><span class="ranking-muted">No results.</span></li>`
       : movies.map((m, i) => `
           <li>
             ${m.poster_url
               ? `<img class="tmdb-thumb" src="${esc(m.poster_url)}" alt="" loading="lazy">`
               : `<span class="tmdb-thumb tmdb-thumb--empty"></span>`}
             <span class="friend-row__name">${esc(m.title)}
-              ${m.release_year ? `<span class="movies-muted">(${esc(m.release_year)})</span>` : ""}
-              ${m.director ? `<span class="movies-muted">${esc(MEDIA.credit)} ${esc(m.director)}</span>` : ""}
-              ${m.isbn ? `<span class="movies-muted">ISBN ${esc(m.isbn)}</span>` : ""}
-              <span class="tmdb-ratings movies-muted" data-ext-id="${esc(m.tmdb_id ?? m.openlibrary_id ?? i)}"></span>
+              ${m.release_year ? `<span class="ranking-muted">(${esc(m.release_year)})</span>` : ""}
+              ${m.director ? `<span class="ranking-muted">${esc(MEDIA.credit)} ${esc(m.director)}</span>` : ""}
+              ${m.isbn ? `<span class="ranking-muted">ISBN ${esc(m.isbn)}</span>` : ""}
+              <span class="tmdb-ratings ranking-muted" data-ext-id="${esc(m.tmdb_id ?? m.openlibrary_id ?? i)}"></span>
             </span>
             <button type="button" class="btn btn--inverse btn--small-inline" data-pick="${i}">Select</button>
           </li>
@@ -1078,7 +1078,7 @@ function renderAddStepSearch() {
         const movies = await searchMedia(flow.searchQuery);
         renderResults(movies);
       } catch (err) {
-        results.innerHTML = `<li><span class="movies-muted">${esc(err.message)} — you can still add the ${esc(MEDIA.noun)} manually.</span></li>`;
+        results.innerHTML = `<li><span class="ranking-muted">${esc(err.message)} — you can still add the ${esc(MEDIA.noun)} manually.</span></li>`;
       }
     }, 300);
   });
@@ -1090,7 +1090,7 @@ function renderAddStepSearch() {
 function matchesHtml(matches) {
   return `
     <h3>Is it one of these?</h3>
-    <ul class="movies-search-results">
+    <ul class="ranking-search-results">
       ${matches.map((m) => `
         <li>
           <span>${esc(movieLabel(m))}</span>
@@ -1125,20 +1125,22 @@ function renderAddStepDetails() {
     <h2>Log this ${esc(MEDIA.noun)}</h2>
     <p><strong>${esc(movieLabel(flow.selectedMovie))}</strong>
        <button type="button" class="btn btn--inverse btn--small-inline" id="change-movie">Change</button></p>
-    <div class="movies-form">
+    <div class="ranking-form">
       <form id="details-form">
-        <label for="watch-date">When did you ${esc(MEDIA.verb)} it?</label>
-        <input type="date" id="watch-date" value="${esc(flow.watchedOn)}">
+        <label for="watch-date">When did you ${esc(MEDIA.verb)}?</label>
+        <input type="${flow.watchedOn ? "date" : "text"}" id="watch-date" value="${esc(flow.watchedOn)}" placeholder="List a date" autocomplete="off">
 
-        <label for="with-search">${esc(cap(MEDIA.verbPast))} with (search registered users)</label>
-        <div id="with-chips">${withChipsHtml(flow.withUsers)}</div>
-        <input type="text" id="with-search" placeholder="Search by name or username" autocomplete="off">
-        <ul class="movies-search-results" id="with-results"></ul>
+        <label for="with-search">With whom did you ${esc(MEDIA.verb)}?</label>
+        <div class="chip-input">
+          <span id="with-chips">${withChipsHtml(flow.withUsers)}</span>
+          <input type="text" id="with-search" placeholder="Search friends" autocomplete="off">
+        </div>
+        <ul class="ranking-search-results" id="with-results"></ul>
 
-        <label for="watch-notes">Private notes (optional, only you can see these)</label>
+        <label for="watch-notes">Private notes</label>
         <textarea id="watch-notes" rows="2">${esc(flow.notes)}</textarea>
 
-        <div class="movies-form__actions">
+        <div class="ranking-form__actions">
           <button type="submit" class="btn">Save &amp; rate it</button>
           <button type="button" class="btn btn--inverse" id="save-unrated">Save without rating</button>
           <a class="btn btn--inverse" href="#/">Cancel</a>
@@ -1155,6 +1157,7 @@ function renderAddStepDetails() {
   });
 
   bindWithSearch(flow);
+  bindOptionalDate(root.querySelector("#watch-date"));
 
   const submitWatch = async (thenRate) => {
     flow.watchedOn = root.querySelector("#watch-date").value || null;
@@ -1179,8 +1182,29 @@ function renderAddStepDetails() {
   root.querySelector("#save-unrated").addEventListener("click", () => submitWatch(false));
 }
 
+/*
+ * An optional date field: a plain text box that invites the user to "List a
+ * date". On focus it becomes a native date picker pre-filled with today and
+ * opens the calendar; clearing the value and leaving turns it back into the
+ * invitation (an undated watch).
+ */
+function bindOptionalDate(input) {
+  input.addEventListener("focus", () => {
+    if (input.type !== "date") input.type = "date";
+    if (!input.value) input.value = todayStr();
+    try {
+      input.showPicker?.();
+    } catch {
+      /* showPicker needs a user gesture; the native control still works */
+    }
+  });
+  input.addEventListener("blur", () => {
+    if (!input.value) input.type = "text";
+  });
+}
+
 function withChipsHtml(users) {
-  if (users.length === 0) return `<span class="movies-muted">No one selected.</span>`;
+  if (users.length === 0) return "";
   return users.map((u) => `
     <span class="person-chip">${esc(u.display_name)}
       <button type="button" data-remove-user="${esc(u.id)}" aria-label="Remove">&times;</button>
@@ -1204,37 +1228,128 @@ function bindWithSearch(flow) {
   };
   refreshChips();
 
+  const showPeople = (people) => {
+    const visible = (people ?? []).filter((p) => !flow.withUsers.some((u) => u.id === p.id));
+    results.innerHTML = visible.map((p) => `
+      <li>
+        <span>${esc(p.display_name)} <span class="ranking-muted">@${esc(p.username)}</span></span>
+        <button type="button" class="btn btn--inverse btn--small-inline" data-add-user="${esc(p.id)}">Add</button>
+      </li>
+    `).join("");
+    results.querySelectorAll("[data-add-user]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const person = visible.find((p) => p.id === btn.dataset.addUser);
+        if (person) flow.withUsers.push(person);
+        input.value = "";
+        results.innerHTML = "";
+        refreshChips();
+        showRecents(); // the input kept focus, so offer the remaining suggestions
+      });
+    });
+  };
+
+  /*
+   * Only accepted friends can be logged as participants (the database
+   * enforces this too — see migration-009). Fetched once per form.
+   */
+  let friendIdsPromise = null;
+  const loadFriendIds = () => {
+    friendIdsPromise ??= (async () => {
+      const me = uid();
+      const { data } = await sb.from("friendships")
+        .select("requester_id, addressee_id")
+        .eq("status", "accepted");
+      return (data ?? []).map((f) => (f.requester_id === me ? f.addressee_id : f.requester_id));
+    })();
+    return friendIdsPromise;
+  };
+
+  /*
+   * Friends most recently logged as participants on the user's own watch
+   * events, deduped, most recent first. Fetched once per form and shown as
+   * suggestions while the search box is empty.
+   */
+  let recentsPromise = null;
+  const loadRecents = () => {
+    recentsPromise ??= (async () => {
+      const friendIds = new Set(await loadFriendIds());
+      const { data } = await sb.from("watch_events")
+        .select("watched_on, created_at, watch_event_participants(profiles(id, username, display_name))")
+        .eq("user_id", uid())
+        .order("watched_on", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: false })
+        .limit(25);
+      const seen = new Set();
+      const people = [];
+      for (const event of data ?? []) {
+        for (const part of event.watch_event_participants ?? []) {
+          const p = part.profiles;
+          if (p && friendIds.has(p.id) && !seen.has(p.id)) {
+            seen.add(p.id);
+            people.push(p);
+          }
+        }
+      }
+      return people;
+    })();
+    return recentsPromise;
+  };
+
+  const showRecents = async () => {
+    const people = await loadRecents();
+    if (input.value.trim() !== "") return; // user started typing meanwhile
+    showPeople(people.filter((p) => !flow.withUsers.some((u) => u.id === p.id)).slice(0, 3));
+  };
+
+  input.addEventListener("focus", () => {
+    if (input.value.trim() === "") showRecents();
+  });
+
+  // Clicking a suggestion must not blur the input first, or the blur
+  // handler below would remove the Add button before its click lands.
+  results.addEventListener("mousedown", (e) => e.preventDefault());
+
+  input.addEventListener("blur", () => {
+    results.innerHTML = "";
+  });
+
+  // The chip container looks like the text box; clicking anywhere in it
+  // should focus the real input.
+  const box = input.closest(".chip-input");
+  box?.addEventListener("click", (e) => {
+    if (e.target === box) input.focus();
+  });
+
   let timer = null;
   input.addEventListener("input", () => {
     clearTimeout(timer);
     const q = input.value.trim();
+    if (q.length === 0) {
+      results.innerHTML = "";
+      showRecents();
+      return;
+    }
     if (q.length < 2) {
       results.innerHTML = "";
       return;
     }
     timer = setTimeout(async () => {
-      const { data } = await sb.from("profiles")
-        .select("id, username, display_name")
-        .or(`username.ilike.%${q}%,display_name.ilike.%${q}%`)
-        .neq("id", uid())
-        .limit(6);
-      results.innerHTML = (data ?? [])
-        .filter((p) => !flow.withUsers.some((u) => u.id === p.id))
-        .map((p) => `
-          <li>
-            <span>${esc(p.display_name)} <span class="movies-muted">@${esc(p.username)}</span></span>
-            <button type="button" class="btn btn--inverse btn--small-inline" data-add-user="${esc(p.id)}">Add</button>
-          </li>
-        `).join("");
-      results.querySelectorAll("[data-add-user]").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const person = (data ?? []).find((p) => p.id === btn.dataset.addUser);
-          if (person) flow.withUsers.push(person);
-          input.value = "";
-          results.innerHTML = "";
-          refreshChips();
-        });
-      });
+      const friendIds = await loadFriendIds();
+      let people = [];
+      if (friendIds.length > 0) {
+        const { data } = await sb.from("profiles")
+          .select("id, username, display_name")
+          .or(`username.ilike.%${q}%,display_name.ilike.%${q}%`)
+          .in("id", friendIds)
+          .limit(6);
+        people = data ?? [];
+      }
+      if (input.value.trim() !== q) return; // stale response
+      if (people.length === 0) {
+        results.innerHTML = `<li><span class="ranking-muted">No matching friends. Only accepted friends can be added.</span></li>`;
+        return;
+      }
+      showPeople(people);
     }, 250);
   });
 }
@@ -1356,7 +1471,7 @@ function renderBucketChoice() {
       `).join("")}
     </div>
     <p><a class="btn btn--inverse" href="#/">Cancel</a></p>
-    <p class="movies-muted">Cancelling keeps the ${esc(MEDIA.verb)} logged; you can rate the ${esc(MEDIA.noun)} later from its page.</p>
+    <p class="ranking-muted">Cancelling keeps the ${esc(MEDIA.verb)} logged; you can rate the ${esc(MEDIA.noun)} later from its page.</p>
   `);
   bindToolbar();
 
@@ -1409,13 +1524,13 @@ function renderComparison() {
     <div class="compare-cards">
       <div class="compare-card">
         <div class="compare-card__title">${esc(movieLabel(flow.movie))}</div>
-        <div class="movies-muted">The ${esc(MEDIA.noun)} you're ranking</div>
+        <div class="ranking-muted">The ${esc(MEDIA.noun)} you're ranking</div>
         <button type="button" class="btn" id="prefer-new">I liked this more</button>
       </div>
       <div class="compare-vs">vs.</div>
       <div class="compare-card">
         <div class="compare-card__title">${esc(movieLabel(existing))}</div>
-        <div class="movies-muted">Already in your ${esc(flow.bucket)} list</div>
+        <div class="ranking-muted">Already in your ${esc(flow.bucket)} list</div>
         <button type="button" class="btn" id="prefer-existing">I liked this more</button>
       </div>
     </div>
@@ -1610,11 +1725,11 @@ async function renderMovieDetail(movieId) {
   setView(`
     ${toolbarHtml()}
     <h2>${esc(movie.title)} ${movie.release_year ? `<span class="movie-row__year">(${esc(movie.release_year)})</span>` : ""}</h2>
-    ${movie.director ? `<p class="movies-muted">${esc(MEDIA.credit)} ${esc(movie.director)}</p>` : ""}
-    <p class="movies-muted" id="ext-ratings" hidden></p>
+    ${movie.director ? `<p class="ranking-muted">${esc(MEDIA.credit)} ${esc(movie.director)}</p>` : ""}
+    <p class="ranking-muted" id="ext-ratings" hidden></p>
     ${movie.poster_url ? `<img class="movie-poster" src="${esc(movie.poster_url)}" alt="Poster for ${esc(movie.title)}" loading="lazy">` : ""}
 
-    <div class="movies-section">
+    <div class="ranking-section">
       <h3>My rating</h3>
       ${myRating
         ? `<p class="rating-pills">${bucketBadge(myRating.bucket, "pill--compact")} ${scorePill(myRating.score, myRating.bucket, "pill--compact")} ${rankPill(myOverallRank, myRating.bucket, "pill--compact", (allMineRes.data ?? []).length)}</p>`
@@ -1627,7 +1742,7 @@ async function renderMovieDetail(movieId) {
       <div id="log-watch-area"></div>
     </div>
 
-    <div class="movies-section">
+    <div class="ranking-section">
       <h3>My ${esc(MEDIA.verb)} history</h3>
       ${watches.length === 0
         ? `<div class="notice">No ${esc(MEDIA.eventPlural)} logged for this ${esc(MEDIA.noun)}.</div>`
@@ -1647,7 +1762,7 @@ async function renderMovieDetail(movieId) {
           }).join("")}
     </div>
 
-    <div class="movies-section">
+    <div class="ranking-section">
       <h3>Friend's rating</h3>
       ${otherRatings.length === 0
         ? `<div class="notice">No one else has rated this ${esc(MEDIA.noun)} yet.</div>`
@@ -1724,27 +1839,31 @@ async function renderMovieDetail(movieId) {
   root.querySelector("#log-watch-btn").addEventListener("click", () => {
     const area = root.querySelector("#log-watch-area");
     area.innerHTML = `
-      <form id="rewatch-form" class="movies-form">
-        <label for="rewatch-date">${esc(cap(MEDIA.verbPast))} on</label>
-        <input type="date" id="rewatch-date" value="${esc(todayStr())}">
-        <label for="rewatch-search">${esc(cap(MEDIA.verbPast))} with</label>
-        <div id="with-chips"></div>
-        <input type="text" id="with-search" placeholder="Search by name or username" autocomplete="off">
-        <ul class="movies-search-results" id="with-results"></ul>
-        <label for="rewatch-notes">Private notes (optional)</label>
+      <form id="rewatch-form" class="ranking-form">
+        <label for="rewatch-date">When did you ${esc(MEDIA.verb)}?</label>
+        <input type="text" id="rewatch-date" placeholder="List a date" autocomplete="off">
+        <label for="with-search">With whom did you ${esc(MEDIA.verb)}?</label>
+        <div class="chip-input">
+          <span id="with-chips"></span>
+          <input type="text" id="with-search" placeholder="Search friends" autocomplete="off">
+        </div>
+        <ul class="ranking-search-results" id="with-results"></ul>
+        <label for="rewatch-notes">Private notes</label>
         <textarea id="rewatch-notes" rows="2"></textarea>
-        <div class="movies-form__actions">
+        <div class="ranking-form__actions">
           <button type="submit" class="btn">Save ${esc(MEDIA.verb)}</button>
         </div>
       </form>
     `;
     const rewatch = { withUsers: [] };
     bindWithSearch(rewatch);
+    const dateInput = area.querySelector("#rewatch-date");
+    bindOptionalDate(dateInput);
     area.querySelector("#rewatch-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const flow = {
         selectedMovie: { id: movie.id },
-        watchedOn: area.querySelector("#rewatch-date").value || null,
+        watchedOn: dateInput.value || null,
         notes: area.querySelector("#rewatch-notes").value.trim(),
         withUsers: rewatch.withUsers,
       };
@@ -1791,21 +1910,21 @@ async function renderFriends() {
     ${toolbarHtml()}
     <h2>Friends</h2>
 
-    <div class="movies-section">
+    <div class="ranking-section">
       <h3>Find people</h3>
-      <div class="movies-form">
+      <div class="ranking-form">
         <input type="text" id="friend-search" placeholder="Search by name or username" autocomplete="off">
-        <ul class="movies-search-results" id="friend-search-results"></ul>
+        <ul class="ranking-search-results" id="friend-search-results"></ul>
       </div>
     </div>
 
-    <div class="movies-section">
+    <div class="ranking-section">
       <h3>Incoming requests</h3>
       ${incoming.length === 0 ? `<div class="notice">No incoming requests.</div>` : incoming.map((f) => `
         <div class="friend-row">
           <span class="friend-row__name">
             <a href="#/profile/${esc(encodeURIComponent(f.requester?.username ?? ""))}">${esc(f.requester?.display_name ?? "Unknown")}</a>
-            <span class="movies-muted">@${esc(f.requester?.username ?? "")}</span>
+            <span class="ranking-muted">@${esc(f.requester?.username ?? "")}</span>
           </span>
           <button type="button" class="btn btn--small-inline" data-accept="${esc(f.id)}">Accept</button>
           <button type="button" class="btn btn--inverse btn--small-inline" data-remove="${esc(f.id)}">Decline</button>
@@ -1813,20 +1932,20 @@ async function renderFriends() {
       `).join("")}
     </div>
 
-    <div class="movies-section">
+    <div class="ranking-section">
       <h3>Outgoing requests</h3>
       ${outgoing.length === 0 ? `<div class="notice">No outgoing requests.</div>` : outgoing.map((f) => `
         <div class="friend-row">
           <span class="friend-row__name">
             ${esc(f.addressee?.display_name ?? "Unknown")}
-            <span class="movies-muted">@${esc(f.addressee?.username ?? "")}</span>
+            <span class="ranking-muted">@${esc(f.addressee?.username ?? "")}</span>
           </span>
           <button type="button" class="btn btn--inverse btn--small-inline" data-remove="${esc(f.id)}">Cancel</button>
         </div>
       `).join("")}
     </div>
 
-    <div class="movies-section">
+    <div class="ranking-section">
       <h3>My friends</h3>
       ${accepted.length === 0 ? `<div class="notice">No friends yet. Search above to send a request.</div>` : accepted.map((f) => {
         const { other, otherUsername } = friendRow(f);
@@ -1834,7 +1953,7 @@ async function renderFriends() {
           <div class="friend-row">
             <span class="friend-row__name">
               <a href="#/profile/${esc(encodeURIComponent(otherUsername))}">${esc(other?.display_name ?? "Unknown")}</a>
-              <span class="movies-muted">@${esc(otherUsername)}</span>
+              <span class="ranking-muted">@${esc(otherUsername)}</span>
             </span>
             <button type="button" class="btn btn--inverse btn--small-inline" data-remove="${esc(f.id)}">Unfriend</button>
           </div>
@@ -1842,11 +1961,11 @@ async function renderFriends() {
       }).join("")}
     </div>
 
-    <div class="movies-section">
+    <div class="ranking-section">
       <h3>Invite a friend</h3>
-      <p class="movies-muted">Generate a one-time invite code and share it privately. It is needed to sign up.</p>
+      <p class="ranking-muted">Generate a one-time invite code and share it privately. It is needed to sign up.</p>
       <button type="button" class="btn" id="invite-btn">Generate invite code</button>
-      <span id="invite-code" class="movies-muted"></span>
+      <span id="invite-code" class="ranking-muted"></span>
     </div>
   `);
   bindToolbar();
@@ -1897,10 +2016,10 @@ async function renderFriends() {
         <li>
           <span>
             <a href="#/profile/${esc(encodeURIComponent(p.username))}">${esc(p.display_name)}</a>
-            <span class="movies-muted">@${esc(p.username)}</span>
+            <span class="ranking-muted">@${esc(p.username)}</span>
           </span>
           ${related.has(p.id)
-            ? `<span class="movies-muted">Requested or friends</span>`
+            ? `<span class="ranking-muted">Requested or friends</span>`
             : `<button type="button" class="btn btn--inverse btn--small-inline" data-request="${esc(p.id)}">Add friend</button>`}
         </li>
       `).join("");
@@ -1978,7 +2097,7 @@ async function renderProfilePage(username) {
 
   setView(`
     ${toolbarHtml()}
-    <h2>${esc(person.display_name)} <span class="movies-muted">@${esc(person.username)}</span></h2>
+    <h2>${esc(person.display_name)} <span class="ranking-muted">@${esc(person.username)}</span></h2>
 
     ${!showRankings ? `
       <div class="notice">
@@ -1992,7 +2111,7 @@ async function renderProfilePage(username) {
       const offsets = bucketOffsets(profileRatings);
       const list = profileRatings.filter((r) => r.bucket === b).sort((x, y) => x.rank_position - y.rank_position);
       return `
-        <div class="movies-section">
+        <div class="ranking-section">
           <h3>${bucketBadge(b)}</h3>
           ${list.length === 0 ? `<div class="notice">Nothing here yet.</div>` : list.map((r) => `
             <div class="movie-row">
@@ -2033,8 +2152,8 @@ function init() {
   if (SUPABASE_URL.includes("YOUR-PROJECT") || SUPABASE_ANON_KEY.includes("YOUR-SUPABASE")) {
     setView(`
       <div class="notice">
-        <strong>MovieRank is not configured yet.</strong><br>
-        Set your Supabase URL and anon key in <code>assets/js/movies-config.js</code>
+        <strong>The ranking app is not configured yet.</strong><br>
+        Set your Supabase URL and anon key in <code>ranking-app/ranking-config.js</code>
         and run <code>supabase/schema.sql</code> in your Supabase project.
         See <code>supabase/README.md</code> for the full setup steps.
       </div>

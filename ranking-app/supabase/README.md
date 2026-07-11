@@ -1,4 +1,4 @@
-# MovieRank — Supabase setup
+# Ranking app — Supabase setup
 
 The `/books/`, `/movies/`, and `/shows/` pages on the site are static
 shells sharing one app; all auth, data, and privacy rules live in
@@ -35,7 +35,7 @@ Open **Project Settings → API** in the Supabase dashboard and copy:
 - the **Project URL**
 - the **anon (public)** key
 
-Paste both into [`assets/js/movies-config.js`](../assets/js/movies-config.js).
+Paste both into [`ranking-app/ranking-config.js`](../ranking-config.js).
 
 The anon key is safe to commit **only because** RLS is enabled on every
 table by `schema.sql`. Never put the `service_role` key anywhere in this
@@ -86,7 +86,7 @@ years, posters, and directors fill in automatically:
    any personal-use description is fine).
 3. Paste either the **API Key** (v3) or the **API Read Access Token** (v4)
    into `TMDB_API_KEY` in
-   [`assets/js/movies-config.js`](../assets/js/movies-config.js).
+   [`ranking-app/ranking-config.js`](../ranking-config.js).
 
 Without a key, the app falls back to manual title/year entry.
 
@@ -100,7 +100,7 @@ score (the audience score has no public API):
    (1,000 requests/day tier).
 2. Activate it via the link OMDb emails you.
 3. Paste it into `OMDB_API_KEY` in
-   [`assets/js/movies-config.js`](../assets/js/movies-config.js).
+   [`ranking-app/ranking-config.js`](../ranking-config.js).
 4. Run [`migration-004-imdb-id.sql`](migration-004-imdb-id.sql) once in the
    SQL editor (adds `movies.imdb_id` for precise lookups; fresh installs
    of `schema.sql` already have it).
@@ -120,7 +120,7 @@ Logged-out visitors to `/movies/` can see one account's ranked lists
 (read-only). Two switches control this:
 
 1. `PUBLIC_PROFILE_USERNAME` in
-   [`assets/js/movies-config.js`](../assets/js/movies-config.js) — which
+   [`ranking-app/ranking-config.js`](../ranking-config.js) — which
    account to display (set to `""` to show only the login screen).
 2. `profiles.is_public` in the database — run
    [`migration-005-public-profile.sql`](migration-005-public-profile.sql)

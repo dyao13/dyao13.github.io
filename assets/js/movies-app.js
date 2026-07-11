@@ -350,6 +350,61 @@ function extRatingsText(ratings) {
   return parts.join(" · ");
 }
 
+/*
+ * App-member scores for search results that are already in the library.
+ * Returns a Map keyed by external id (tmdb_id or openlibrary_id) with
+ * { usersPct, friendsPct } — the same "Users xy%" / "Friends xy%" numbers
+ * shown on the movie detail page. Search results not yet in the database
+ * simply have no entry.
+ */
+async function fetchAppScoresForResults(items) {
+  const scores = new Map();
+  const extCol = MEDIA.key === "book" ? "openlibrary_id" : "tmdb_id";
+  const ids = items.map((m) => m[extCol]).filter((v) => v != null);
+  if (ids.length === 0) return scores;
+
+  const { data: rows } = await sb.from("movies")
+    .select(`id, ${extCol}`)
+    .eq("media_type", MEDIA.key)
+    .in(extCol, ids);
+  if (!rows || rows.length === 0) return scores;
+
+  const [ratingsRes, friendsRes] = await Promise.all([
+    sb.from("movie_ratings_visible")
+      .select("movie_id, user_id, score")
+      .eq("media_type", MEDIA.key)
+      .in("movie_id", rows.map((r) => r.id)),
+    sb.from("friendships")
+      .select("requester_id, addressee_id")
+      .eq("status", "accepted")
+      .or(`requester_id.eq.${uid()},addressee_id.eq.${uid()}`),
+  ]);
+
+  const friendIds = new Set((friendsRes.data ?? [])
+    .flatMap((f) => [f.requester_id, f.addressee_id])
+    .filter((id) => id !== uid()));
+
+  const byMovie = new Map();
+  for (const r of ratingsRes.data ?? []) {
+    const list = byMovie.get(r.movie_id) ?? [];
+    list.push(r);
+    byMovie.set(r.movie_id, list);
+  }
+
+  const pct = (list) => list.length > 0
+    ? Math.round((list.reduce((a, b) => a + Number(b.score), 0) / list.length) * 10)
+    : null;
+
+  for (const row of rows) {
+    const list = byMovie.get(row.id) ?? [];
+    scores.set(row[extCol], {
+      usersPct: pct(list),
+      friendsPct: pct(list.filter((r) => friendIds.has(r.user_id))),
+    });
+  }
+  return scores;
+}
+
 function missingColumnName(error) {
   const text = [error?.message, error?.details, error?.hint].filter(Boolean).join(" ");
   return text.match(/'([^']+)' column/)?.[1] ?? text.match(/column "([^"]+)"/)?.[1] ?? null;
@@ -425,9 +480,10 @@ async function renderPublicDashboard() {
     .order("rank_position");
 
   const showLoginButton = `
-    <p class="movies-tagline">A ranking app for friends</p>
+    <p class="movies-tagline">A ranking app for friends &middot; Log in to rank your own</p>
     <div class="movies-toolbar">
-      <button type="button" class="btn" id="show-login">Log in / Sign up</button>
+      <button type="button" class="btn" id="show-login">Log in</button>
+      <button type="button" class="btn btn--inverse" id="show-signup">Sign up</button>
     </div>
   `;
 
@@ -444,7 +500,7 @@ async function renderPublicDashboard() {
     return;
   }
 
-  const displayName = data[0].display_name;
+  const displayName = "Daniel Yao";
   const offsets = bucketOffsets(data);
 
   setView(`
@@ -468,7 +524,7 @@ async function renderPublicDashboard() {
         </div>
       `;
     }).join("")}
-    <p class="movies-muted">A ranking app for friends &mdash; log in to rank your own</p>
+    <p class="movies-muted">A ranking app for friends &middot; Log in to rank your own</p>
   `);
   bindShowLogin();
 }
@@ -476,6 +532,12 @@ async function renderPublicDashboard() {
 function bindShowLogin() {
   root.querySelector("#show-login")?.addEventListener("click", () => {
     state.showAuth = true;
+    state.authMode = "login";
+    renderAuth();
+  });
+  root.querySelector("#show-signup")?.addEventListener("click", () => {
+    state.showAuth = true;
+    state.authMode = "signup";
     renderAuth();
   });
 }
@@ -792,7 +854,7 @@ async function renderDashboard() {
     </div>
 
     <div class="movies-section">
-      <h2>Friend activity</h2>
+      <h2>Friend's activity</h2>
       ${data.feed.length === 0
         ? `<div class="notice">No friend activity yet. Add friends on the <a href="#/friends">Friends</a> page.</div>`
         : data.feed.map((f) => {
@@ -815,6 +877,8 @@ async function renderDashboard() {
             `;
           }).join("")}
     </div>
+
+    <p class="movies-muted">A ranking app for friends</p>
   `);
 
   bindToolbar();
@@ -979,16 +1043,25 @@ function renderAddStepSearch() {
       });
     });
 
-    // Fill in IMDb / Rotten Tomatoes ratings as OMDb responds. Spans are
-    // keyed by TMDB id, so a late response can never label the wrong movie
-    // even if the user has typed a new search in the meantime.
-    if (omdbConfigured()) {
-      for (const m of movies) {
-        fetchExternalRatings(m).then((ratings) => {
-          const span = results.querySelector(`[data-ext-id="${m.tmdb_id}"]`);
-          if (span && ratings) span.textContent = extRatingsText(ratings);
-        });
-      }
+    // Fill in IMDb / Rotten Tomatoes plus the app's Users / Friends scores
+    // as the lookups respond. Spans are keyed by external id, so a late
+    // response can never label the wrong movie even if the user has typed
+    // a new search in the meantime.
+    const appScoresPromise = fetchAppScoresForResults(movies);
+    for (const m of movies) {
+      const extPromise = omdbConfigured() ? fetchExternalRatings(m) : Promise.resolve(null);
+      const key = m.tmdb_id ?? m.openlibrary_id;
+      Promise.all([extPromise, appScoresPromise]).then(([ratings, appScores]) => {
+        const span = results.querySelector(`[data-ext-id="${key}"]`);
+        if (!span) return;
+        const parts = [];
+        const extText = extRatingsText(ratings);
+        if (extText) parts.push(extText);
+        const app = key != null ? appScores.get(key) : null;
+        if (app?.usersPct != null) parts.push(`Users ${app.usersPct}%`);
+        if (app?.friendsPct != null) parts.push(`Friends ${app.friendsPct}%`);
+        if (parts.length > 0) span.textContent = parts.join(" · ");
+      });
     }
   };
 
@@ -1447,7 +1520,7 @@ function renderRankDone() {
 async function renderMovieDetail(movieId) {
   loadingView();
 
-  const [movieRes, ratingRes, allMineRes, watchesRes, othersRes] = await Promise.all([
+  const [movieRes, ratingRes, allMineRes, watchesRes, othersRes, friendsRes] = await Promise.all([
     sb.from("movies").select("*").eq("id", movieId).eq("media_type", MEDIA.key).maybeSingle(),
     sb.from("ratings")
       .select("bucket, rank_position, score")
@@ -1463,6 +1536,10 @@ async function renderMovieDetail(movieId) {
       .eq("movies.media_type", MEDIA.key)
       .order("watched_on", { ascending: false, nullsFirst: false }),
     sb.from("movie_ratings_visible").select("user_id, bucket, score").eq("movie_id", movieId).neq("user_id", uid()),
+    sb.from("friendships")
+      .select("requester_id, addressee_id")
+      .eq("status", "accepted")
+      .or(`requester_id.eq.${uid()},addressee_id.eq.${uid()}`),
   ]);
 
   const movie = movieRes.data;
@@ -1517,8 +1594,17 @@ async function renderMovieDetail(movieId) {
   }
 
   const allScores = [...otherRatings.map((r) => Number(r.score)), ...(myRating ? [Number(myRating.score)] : [])];
-  const avgScore = allScores.length > 0
-    ? formatScore(allScores.reduce((a, b) => a + b, 0) / allScores.length)
+  const avgNum = allScores.length > 0
+    ? allScores.reduce((a, b) => a + b, 0) / allScores.length
+    : null;
+  const friendIds = new Set((friendsRes.data ?? [])
+    .flatMap((f) => [f.requester_id, f.addressee_id])
+    .filter((id) => id !== uid()));
+  const friendScores = otherRatings
+    .filter((r) => friendIds.has(r.user_id))
+    .map((r) => Number(r.score));
+  const friendsAvg = friendScores.length > 0
+    ? friendScores.reduce((a, b) => a + b, 0) / friendScores.length
     : null;
 
   setView(`
@@ -1562,10 +1648,7 @@ async function renderMovieDetail(movieId) {
     </div>
 
     <div class="movies-section">
-      <h3>What others rated it</h3>
-      ${avgScore !== null && allScores.length > 1
-        ? `<p class="movies-muted">Average: <strong>${esc(avgScore)}</strong> across ${allScores.length} ratings</p>`
-        : ""}
+      <h3>Friend's rating</h3>
       ${otherRatings.length === 0
         ? `<div class="notice">No one else has rated this ${esc(MEDIA.noun)} yet.</div>`
         : otherRatings.map((r) => {
@@ -1595,16 +1678,20 @@ async function renderMovieDetail(movieId) {
 
   // External ratings load after the page renders so a slow (or down) OMDb
   // never delays the movie page itself.
-  if (omdbConfigured()) {
-    fetchExternalRatings(movie).then((ratings) => {
-      const p = root.querySelector("#ext-ratings");
-      const text = extRatingsText(ratings);
-      if (p && text) {
-        p.textContent = text;
-        p.hidden = false;
-      }
-    });
-  }
+  const usersPart = avgNum !== null ? `Users ${Math.round(avgNum * 10)}%` : null;
+  const friendsPart = friendsAvg !== null ? `Friends ${Math.round(friendsAvg * 10)}%` : null;
+  (omdbConfigured() ? fetchExternalRatings(movie) : Promise.resolve(null)).then((extRatings) => {
+    const parts = [];
+    const extText = extRatingsText(extRatings);
+    if (extText) parts.push(extText);
+    if (usersPart) parts.push(usersPart);
+    if (friendsPart) parts.push(friendsPart);
+    const p = root.querySelector("#ext-ratings");
+    if (p && parts.length > 0) {
+      p.textContent = parts.join(" · ");
+      p.hidden = false;
+    }
+  });
 
   root.querySelector("#rate-btn").addEventListener("click", () => {
     startRanking({ id: movie.id, title: movie.title, release_year: movie.release_year });

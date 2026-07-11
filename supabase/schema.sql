@@ -406,7 +406,7 @@ begin
   if p_bucket = 'green' then
     v_min := 6.7; v_max := 10.0;
   elsif p_bucket = 'yellow' then
-    v_min := 3.4; v_max := 6.7;
+    v_min := 3.4; v_max := 6.6;
   elsif p_bucket = 'red' then
     v_min := 0.0; v_max := 3.3;
   else

@@ -12,7 +12,7 @@ export function getBucketRange(bucket) {
   }
 
   if (bucket === "yellow") {
-    return { min: 3.4, max: 6.7 };
+    return { min: 3.4, max: 6.6 };
   }
 
   if (bucket === "red") {

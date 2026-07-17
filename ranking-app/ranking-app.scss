@@ -338,12 +338,9 @@ $ranking-red: #c92a2a;
     }
   }
 
-  .compare-vs {
-    margin: 0.25em 0 1em;
-    color: $gray;
-    font-size: $type-size-6;
-    font-weight: bold;
-    text-transform: uppercase;
+  /* The tie option sits in its own box between the two choice cards. */
+  .compare-card--same .btn {
+    margin-top: 0;
   }
 
   .compare-progress {

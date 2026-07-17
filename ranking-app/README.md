@@ -13,12 +13,14 @@ You never type in a score. Instead:
 
 1. **Pick a bucket** for the item: green "I liked it" (6.7–10.0), yellow
    "It was fine" (3.4–6.6), or red "I didn't like it" (0.0–3.3).
-2. **Answer pairwise comparisons** ("which did you prefer?"). A binary search
-   against your existing list finds the item's exact slot in
-   ~log₂(n) questions.
+2. **Answer pairwise comparisons** ("which did you prefer?", or "about the
+   same"). A binary search against your existing list finds the item's exact
+   slot in ~log₂(n) questions; answering "about the same" ties the two items
+   at the same rating.
 3. **Scores are derived from position**: the best item in a bucket gets the
-   bucket's maximum, the worst gets the minimum, and the rest are evenly
-   spaced. Every insertion re-spaces the whole bucket.
+   bucket's maximum, the worst gets the minimum, and the unique rating levels
+   in between are evenly spaced (tied items share one level). Every insertion
+   re-spaces the whole bucket.
 
 Each medium (movies, books, shows) has fully independent lists. Beyond
 ranking, the app tracks watch/read dates with notes and participants, and has

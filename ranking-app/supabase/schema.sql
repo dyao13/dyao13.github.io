@@ -66,6 +66,8 @@ create unique index movies_media_tmdb_key
 create unique index movies_media_openlibrary_key
   on public.movies (media_type, openlibrary_id) where openlibrary_id is not null;
 
+-- rank_position is the tie group (0 = best) within a user's bucket: movies
+-- judged "about the same" share it, and therefore share a score.
 create table public.ratings (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
@@ -75,9 +77,11 @@ create table public.ratings (
   rank_position integer not null,
   score numeric(3,1) not null,
   updated_at timestamptz default now(),
-  unique (user_id, movie_id),
-  unique (user_id, media_type, bucket, rank_position) deferrable initially deferred
+  unique (user_id, movie_id)
 );
+
+create index ratings_user_bucket_rank_idx
+  on public.ratings (user_id, media_type, bucket, rank_position);
 
 create table public.watch_events (
   id uuid primary key default gen_random_uuid(),
@@ -96,12 +100,13 @@ create table public.watch_event_participants (
   unique (watch_event_id, participant_user_id)
 );
 
+-- preferred_movie_id is null when the answer was "about the same".
 create table public.pairwise_comparisons (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
   new_movie_id uuid not null references public.movies(id) on delete cascade,
   compared_movie_id uuid not null references public.movies(id) on delete cascade,
-  preferred_movie_id uuid not null references public.movies(id) on delete cascade,
+  preferred_movie_id uuid references public.movies(id) on delete cascade,
   bucket text not null check (bucket in ('green', 'yellow', 'red')),
   created_at timestamptz default now()
 );
@@ -395,7 +400,9 @@ grant select on public.public_rankings to anon, authenticated;
 -- Scoring + ranking functions
 -- ---------------------------------------------------------------------------
 
--- Mirrors scoreForPosition() in ranking-app/ranking-logic.js.
+-- Mirrors scoreForPosition() in ranking-app/ranking-logic.js. p_index is a
+-- tie-group index (0 = best) and p_total the number of tie groups, so the
+-- distinct score levels in a bucket are evenly spaced.
 create or replace function public.score_for_position(p_index integer, p_total integer, p_bucket text)
 returns numeric
 language plpgsql immutable
@@ -425,9 +432,10 @@ begin
 end;
 $$;
 
--- Re-assign rank_position 0..n-1 (preserving current order) and recompute
--- scores for one user's bucket within one medium. Runs with invoker rights,
--- so RLS still guarantees users can only touch their own rows.
+-- Re-assign tie-group indices 0..k-1 (preserving current order and keeping
+-- tied rows together via dense_rank) and recompute scores for one user's
+-- bucket within one medium. Runs with invoker rights, so RLS still
+-- guarantees users can only touch their own rows.
 create or replace function public.renormalize_bucket(p_user uuid, p_media_type text, p_bucket text)
 returns void
 language plpgsql
@@ -435,7 +443,7 @@ as $$
 declare
   v_total integer;
 begin
-  select count(*) into v_total
+  select count(distinct rank_position) into v_total
   from ratings
   where user_id = p_user and media_type = p_media_type and bucket = p_bucket;
 
@@ -444,7 +452,7 @@ begin
       score = public.score_for_position(sub.new_pos, v_total, p_bucket),
       updated_at = now()
   from (
-    select id, (row_number() over (order by rank_position))::integer - 1 as new_pos
+    select id, (dense_rank() over (order by rank_position))::integer - 1 as new_pos
     from ratings
     where user_id = p_user and media_type = p_media_type and bucket = p_bucket
   ) sub
@@ -453,14 +461,18 @@ end;
 $$;
 
 -- Atomically place p_movie_id in p_bucket using the complete desired order
--- of that bucket (best first). Handles new ratings, re-ranks, and bucket
--- changes; when a movie moves buckets, the old bucket is renormalized in the
--- same transaction. Raises if the provided order is stale (e.g. another tab
--- changed the bucket), so the client can reload and retry.
+-- of that bucket (best first). p_group_indices is a parallel array of dense,
+-- non-decreasing tie-group indices starting at 0 (null = every movie its own
+-- group); movies sharing a group index are tied and share a score. Handles
+-- new ratings, re-ranks, and bucket changes; when a movie moves buckets, the
+-- old bucket is renormalized in the same transaction. Raises if the provided
+-- order is stale (e.g. another tab changed the bucket), so the client can
+-- reload and retry.
 create or replace function public.rank_movie(
   p_movie_id uuid,
   p_bucket text,
-  p_ordered_movie_ids uuid[]
+  p_ordered_movie_ids uuid[],
+  p_group_indices integer[] default null
 )
 returns void
 language plpgsql
@@ -470,6 +482,8 @@ declare
   v_media_type text;
   v_old_bucket text;
   v_total integer := coalesce(array_length(p_ordered_movie_ids, 1), 0);
+  v_groups integer[] := p_group_indices;
+  v_group_count integer;
   i integer;
 begin
   if v_uid is null then
@@ -491,6 +505,26 @@ begin
   if (select count(distinct m) from unnest(p_ordered_movie_ids) m) <> v_total then
     raise exception 'Ordered list contains duplicates';
   end if;
+
+  if v_groups is null then
+    select array_agg(g - 1) into v_groups from generate_series(1, v_total) g;
+  end if;
+
+  if coalesce(array_length(v_groups, 1), 0) <> v_total then
+    raise exception 'Group list must match the ordered list';
+  end if;
+
+  if v_groups[1] <> 0 then
+    raise exception 'Group indices must start at 0';
+  end if;
+
+  for i in 2..v_total loop
+    if v_groups[i] <> v_groups[i - 1] and v_groups[i] <> v_groups[i - 1] + 1 then
+      raise exception 'Group indices must be dense and non-decreasing';
+    end if;
+  end loop;
+
+  v_group_count := v_groups[v_total] + 1;
 
   select media_type into v_media_type from movies where id = p_movie_id;
   if v_media_type is null then
@@ -535,8 +569,8 @@ begin
       p_ordered_movie_ids[i],
       v_media_type,
       p_bucket,
-      i - 1,
-      public.score_for_position(i - 1, v_total, p_bucket),
+      v_groups[i],
+      public.score_for_position(v_groups[i], v_group_count, p_bucket),
       now()
     )
     on conflict (user_id, movie_id) do update
@@ -666,7 +700,7 @@ grant execute on function public.is_friends_with(uuid) to authenticated;
 grant execute on function public.can_view_watch_event(uuid) to authenticated;
 grant execute on function public.score_for_position(integer, integer, text) to authenticated;
 grant execute on function public.renormalize_bucket(uuid, text, text) to authenticated;
-grant execute on function public.rank_movie(uuid, text, uuid[]) to authenticated;
+grant execute on function public.rank_movie(uuid, text, uuid[], integer[]) to authenticated;
 grant execute on function public.remove_rating(uuid) to authenticated;
 grant execute on function public.claim_invite_and_create_profile(text, text, text) to authenticated;
 grant execute on function public.create_invite_code() to authenticated;

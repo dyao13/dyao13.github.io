@@ -146,14 +146,20 @@ the SQL editor. It backfills all existing data as `movie`.
 ## Migrations, in order
 
 If you set up the database from an older `schema.sql`, run any migration
-files you have not yet applied, in numeric order (002 → 007). A fresh
+files you have not yet applied, in numeric order (002 → 010). A fresh
 `schema.sql` install needs none of them except the personal `update`
 statement at the end of migration 005.
 
 ## Ranking data model (for reference)
 
-- `ratings.rank_position` (0 = best, per user per bucket) is the canonical
-  order; the one-decimal `score` is derived from it.
+- `ratings.rank_position` (0 = best, per user per bucket) is the movie's
+  tie group: movies judged "about the same" during comparisons share it,
+  and therefore share a score.
+- The one-decimal `score` is derived from the tie group — each bucket's
+  distinct score levels are spaced evenly between the bucket bounds.
 - All rank/score writes go through the `rank_movie` and `remove_rating`
   RPCs, which update a whole bucket in one transaction and reject stale
   orderings (e.g. from a second open tab).
+- Ties need [`migration-010-ties.sql`](migration-010-ties.sql) (drops the
+  unique rank constraint and teaches the RPCs about tie groups); fresh
+  `schema.sql` installs already include it.

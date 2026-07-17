@@ -24,8 +24,9 @@ import {
   isInsertionDone,
   nextComparisonIndex,
   applyComparison,
-  insertAt,
-  bucketOffsets,
+  compareRatings,
+  groupTies,
+  buildRankedOrder,
   overallRank,
 } from "./ranking-logic.js";
 
@@ -501,19 +502,18 @@ async function renderPublicDashboard() {
   }
 
   const displayName = "Daniel Yao";
-  const offsets = bucketOffsets(data);
 
   setView(`
     ${showLoginButton}
     <h2>${esc(displayName)}'s ${esc(MEDIA.plural)}</h2>
     ${BUCKETS.map((b) => {
-      const list = data.filter((r) => r.bucket === b).sort((x, y) => x.rank_position - y.rank_position);
+      const list = data.filter((r) => r.bucket === b).sort(compareRatings);
       return `
         <div class="ranking-section">
           <h3>${bucketBadge(b)}</h3>
           ${list.length === 0 ? `<div class="notice">Nothing here yet.</div>` : list.map((r) => `
             <div class="movie-row movie-row--${esc(r.bucket)}">
-              <span class="movie-row__rank">${overallRank(r, offsets)}.</span>
+              <span class="movie-row__rank">${overallRank(r, data)}.</span>
               ${scorePill(r.score, r.bucket)}
               <div class="movie-row__body">
                 <span class="movie-row__title">${esc(r.title)}</span>
@@ -754,7 +754,7 @@ function watchInfoByMovie(watches) {
   return info;
 }
 
-function rankedRowHtml(rating, watchInfo, offsets) {
+function rankedRowHtml(rating, watchInfo, allRatings) {
   const movie = rating.movies;
   const info = watchInfo.get(rating.movie_id);
   const metaParts = [esc(rating.bucket[0].toUpperCase() + rating.bucket.slice(1))];
@@ -765,7 +765,7 @@ function rankedRowHtml(rating, watchInfo, offsets) {
 
   return `
     <div class="movie-row movie-row--${esc(rating.bucket)}">
-      <span class="movie-row__rank">${overallRank(rating, offsets)}.</span>
+      <span class="movie-row__rank">${overallRank(rating, allRatings)}.</span>
       ${scorePill(rating.score, rating.bucket)}
       <div class="movie-row__body">
         <a class="movie-row__title" href="#/movie/${esc(rating.movie_id)}">${esc(movie?.title ?? "Unknown")}</a>
@@ -776,27 +776,26 @@ function rankedRowHtml(rating, watchInfo, offsets) {
   `;
 }
 
-function bucketListHtml(ratings, bucket, watchInfo, offsets) {
-  const list = ratings.filter((r) => r.bucket === bucket).sort((a, b) => a.rank_position - b.rank_position);
+function bucketListHtml(ratings, bucket, watchInfo) {
+  const list = ratings.filter((r) => r.bucket === bucket).sort(compareRatings);
   if (list.length === 0) {
     return `<div class="notice">No ${esc(bucket)} ${esc(MEDIA.plural)} yet.</div>`;
   }
-  return list.map((r) => rankedRowHtml(r, watchInfo, offsets)).join("");
+  return list.map((r) => rankedRowHtml(r, watchInfo, ratings)).join("");
 }
 
 function dashboardListHtml(data) {
   const watchInfo = watchInfoByMovie(data.watches);
-  const offsets = bucketOffsets(data.ratings);
   if (data.ratings.length === 0 && state.dashboardTab === "all") {
     return `<div class="notice">You have not ranked any ${esc(MEDIA.plural)} yet. Use "Add ${esc(MEDIA.noun)}" to get started.</div>`;
   }
   if (state.dashboardTab === "all") {
     return BUCKETS.map((b) => `
       <h3>${bucketBadge(b)}</h3>
-      ${bucketListHtml(data.ratings, b, watchInfo, offsets)}
+      ${bucketListHtml(data.ratings, b, watchInfo)}
     `).join("");
   }
-  return bucketListHtml(data.ratings, state.dashboardTab, watchInfo, offsets);
+  return bucketListHtml(data.ratings, state.dashboardTab, watchInfo);
 }
 
 async function renderDashboard() {
@@ -1440,7 +1439,7 @@ async function saveWatch(flow) {
 /* ------------------------------------------------------------------ */
 
 function startRanking(movie) {
-  state.rankFlow = { movie, step: "bucket", bucket: null, list: [], insertion: null };
+  state.rankFlow = { movie, step: "bucket", bucket: null, list: [], groups: [], insertion: null };
   go("#/rank");
 }
 
@@ -1501,14 +1500,15 @@ async function chooseBucket(bucket) {
     .order("rank_position");
   if (error) throw error;
 
-  flow.list = data ?? [];
+  flow.list = (data ?? []).sort(compareRatings);
+  flow.groups = groupTies(flow.list);
 
-  if (flow.list.length === 0) {
-    await finalizeRanking(0);
+  if (flow.groups.length === 0) {
+    await finalizeRanking(createInsertionState(0));
     return;
   }
 
-  flow.insertion = createInsertionState(flow.list.length);
+  flow.insertion = createInsertionState(flow.groups.length);
   flow.step = "compare";
   renderRankFlow();
 }
@@ -1516,7 +1516,9 @@ async function chooseBucket(bucket) {
 function renderComparison() {
   const flow = state.rankFlow;
   const idx = nextComparisonIndex(flow.insertion);
-  const existing = flow.list[idx].movies;
+  const group = flow.groups[idx];
+  const existing = group[0].movies;
+  const tiedOthers = group.length - 1;
 
   setView(`
     ${toolbarHtml()}
@@ -1527,11 +1529,17 @@ function renderComparison() {
         <div class="ranking-muted">The ${esc(MEDIA.noun)} you're ranking</div>
         <button type="button" class="btn" id="prefer-new">I liked this more</button>
       </div>
-      <div class="compare-vs">vs.</div>
       <div class="compare-card">
         <div class="compare-card__title">${esc(movieLabel(existing))}</div>
-        <div class="ranking-muted">Already in your ${esc(flow.bucket)} list</div>
+        <div class="ranking-muted">
+          Already in your ${esc(flow.bucket)} list${tiedOthers > 0
+            ? ` &middot; tied with ${tiedOthers} other ${esc(tiedOthers === 1 ? MEDIA.noun : MEDIA.plural)}`
+            : ""}
+        </div>
         <button type="button" class="btn" id="prefer-existing">I liked this more</button>
+      </div>
+      <div class="compare-card compare-card--same">
+        <button type="button" class="btn" id="prefer-same">I liked them equally</button>
       </div>
     </div>
     <p>
@@ -1541,24 +1549,25 @@ function renderComparison() {
   `);
   bindToolbar();
 
-  const record = async (prefersNew) => {
+  const record = async (outcome) => {
     // Comparison history is for debugging/analysis only; a failure here
-    // should not block ranking.
+    // should not block ranking. A tie has no preferred movie (needs
+    // migration 010; on older databases the insert just fails and warns).
     sb.from("pairwise_comparisons").insert({
       user_id: uid(),
       new_movie_id: flow.movie.id,
       compared_movie_id: existing.id,
-      preferred_movie_id: prefersNew ? flow.movie.id : existing.id,
+      preferred_movie_id: outcome === "same" ? null : outcome === "new" ? flow.movie.id : existing.id,
       bucket: flow.bucket,
     }).then(({ error }) => {
       if (error) console.warn("Could not log comparison:", error.message);
     });
 
-    flow.insertion = applyComparison(flow.insertion, prefersNew);
+    flow.insertion = applyComparison(flow.insertion, outcome);
     if (isInsertionDone(flow.insertion)) {
       loadingView("Saving your ranking…");
       try {
-        await finalizeRanking(flow.insertion.low);
+        await finalizeRanking(flow.insertion);
       } catch (err) {
         setView(`
           ${toolbarHtml()}
@@ -1573,8 +1582,9 @@ function renderComparison() {
     }
   };
 
-  root.querySelector("#prefer-new").addEventListener("click", () => record(true));
-  root.querySelector("#prefer-existing").addEventListener("click", () => record(false));
+  root.querySelector("#prefer-new").addEventListener("click", () => record("new"));
+  root.querySelector("#prefer-existing").addEventListener("click", () => record("existing"));
+  root.querySelector("#prefer-same").addEventListener("click", () => record("same"));
   root.querySelector("#change-bucket").addEventListener("click", () => {
     flow.step = "bucket";
     flow.insertion = null;
@@ -1582,15 +1592,31 @@ function renderComparison() {
   });
 }
 
-async function finalizeRanking(insertionIndex) {
+async function finalizeRanking(insertion) {
   const flow = state.rankFlow;
-  const orderedIds = insertAt(flow.list.map((r) => r.movie_id), insertionIndex, flow.movie.id);
+  const groupIds = flow.groups.map((g) => g.map((r) => r.movie_id));
+  const { orderedIds, groupIndices } = buildRankedOrder(groupIds, insertion, flow.movie.id);
 
-  const { error } = await sb.rpc("rank_movie", {
+  let { error } = await sb.rpc("rank_movie", {
     p_movie_id: flow.movie.id,
     p_bucket: flow.bucket,
     p_ordered_movie_ids: orderedIds,
+    p_group_indices: groupIndices,
   });
+
+  // Databases without migration 010 only know the 3-argument rank_movie.
+  // Without ties the old call is equivalent; with ties there is no way to
+  // save them, so ask for the migration.
+  if (error?.code === "PGRST202") {
+    if (new Set(groupIndices).size !== orderedIds.length) {
+      throw new Error('Saving "about the same" ties needs migration 010 (see ranking-app/supabase).');
+    }
+    ({ error } = await sb.rpc("rank_movie", {
+      p_movie_id: flow.movie.id,
+      p_bucket: flow.bucket,
+      p_ordered_movie_ids: orderedIds,
+    }));
+  }
   if (error) throw error;
 
   const [{ data }, { data: allMine }] = await Promise.all([
@@ -1599,11 +1625,11 @@ async function finalizeRanking(insertionIndex) {
       .eq("user_id", uid())
       .eq("movie_id", flow.movie.id)
       .single(),
-    sb.from("ratings").select("bucket").eq("user_id", uid()).eq("media_type", MEDIA.key),
+    sb.from("ratings").select("bucket, rank_position").eq("user_id", uid()).eq("media_type", MEDIA.key),
   ]);
 
   flow.result = data;
-  flow.overallRank = overallRank(data, bucketOffsets(allMine ?? []));
+  flow.overallRank = overallRank(data, allMine ?? []);
   flow.totalRanked = (allMine ?? []).length;
   flow.step = "done";
   renderRankFlow();
@@ -1643,7 +1669,7 @@ async function renderMovieDetail(movieId) {
       .eq("movie_id", movieId)
       .eq("media_type", MEDIA.key)
       .maybeSingle(),
-    sb.from("ratings").select("bucket").eq("user_id", uid()).eq("media_type", MEDIA.key),
+    sb.from("ratings").select("bucket, rank_position").eq("user_id", uid()).eq("media_type", MEDIA.key),
     sb.from("watch_events")
       .select("id, watched_on, notes, created_at, movies!inner(media_type), watch_event_participants(profiles(username, display_name))")
       .eq("user_id", uid())
@@ -1664,7 +1690,7 @@ async function renderMovieDetail(movieId) {
   }
 
   const myRating = ratingRes.data;
-  const myOverallRank = myRating ? overallRank(myRating, bucketOffsets(allMineRes.data ?? [])) : null;
+  const myOverallRank = myRating ? overallRank(myRating, allMineRes.data ?? []) : null;
   const watches = watchesRes.data ?? [];
 
   let otherRatings = othersRes.data;
@@ -1770,7 +1796,7 @@ async function renderMovieDetail(movieId) {
             const p = otherProfiles.get(r.user_id);
             const list = otherLists.get(r.user_id) ?? [];
             const entry = list.find((x) => x.movie_id === movieId);
-            const rank = entry ? overallRank(entry, bucketOffsets(list)) : null;
+            const rank = entry ? overallRank(entry, list) : null;
             return `
               <div class="movie-row">
                 <div class="movie-row__body">
@@ -2108,14 +2134,13 @@ async function renderProfilePage(username) {
     ${!isFriend && !friendship ? `<p><button type="button" class="btn" id="add-friend-btn">Add friend</button></p>` : ""}
 
     ${showRankings ? BUCKETS.map((b) => {
-      const offsets = bucketOffsets(profileRatings);
-      const list = profileRatings.filter((r) => r.bucket === b).sort((x, y) => x.rank_position - y.rank_position);
+      const list = profileRatings.filter((r) => r.bucket === b).sort(compareRatings);
       return `
         <div class="ranking-section">
           <h3>${bucketBadge(b)}</h3>
           ${list.length === 0 ? `<div class="notice">Nothing here yet.</div>` : list.map((r) => `
             <div class="movie-row">
-              <span class="movie-row__rank">${overallRank(r, offsets)}.</span>
+              <span class="movie-row__rank">${overallRank(r, profileRatings)}.</span>
               ${scorePill(r.score, r.bucket)}
               <div class="movie-row__body">
                 <a class="movie-row__title" href="#/movie/${esc(r.movie_id)}">${esc(r.movies?.title ?? "Unknown")}</a>

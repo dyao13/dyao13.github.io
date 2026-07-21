@@ -47,4 +47,4 @@ export const OMDB_API_KEY = "83471f14";
  * Set to "" to require login for everything.
  */
 
-export const PUBLIC_PROFILE_USERNAME = "dandanfroghamster";
+export const PUBLIC_PROFILE_USERNAME = "dandanfroghamsterbear";
